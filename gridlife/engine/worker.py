@@ -61,8 +61,6 @@ class StripWorker:
         self.grid = torch.zeros(c, self.owned_height + 2 * h, self.width, device=self.device)
         self.grid[:, h : h + self.owned_height, :] = strip_data.to(self.device)
 
-        self.palette_lut = simulation.palette().to(self.device)
-
         self._last_step_ms: float = 0.0
         self._device_name: str = str(self.device)
 
@@ -105,13 +103,16 @@ class StripWorker:
         self.grid[:, h + self.owned_height :, :] = data.to(self.device)
 
     def render(self) -> bytes:
-        """Apply colormap to owned region, return raw RGB bytes for compositing."""
+        """
+        Apply render_transform to get values in [0,1], quantize to uint8.
+        Returns raw uint8 bytes (height * width), NOT RGB.
+        The browser applies the palette client-side.
+        """
         h = self.halo_size
         owned = self.grid[:, h : h + self.owned_height, :]
         vis = self.simulation.render_transform(owned)
         indices = (vis * 255).clamp(0, 255).byte()
-        rgb = self.palette_lut[indices.long()]
-        return rgb.cpu().numpy().tobytes()
+        return indices.cpu().numpy().tobytes()
 
     def get_strip_data(self) -> torch.Tensor:
         """Return owned grid data without halos. Used for repartitioning and grid collection."""

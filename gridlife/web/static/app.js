@@ -3,7 +3,10 @@ const ctx = canvas.getContext("2d");
 
 let ws = null;
 let simInfo = null;
-let currentFrame = null;
+let palette = null; // Uint8Array of 768 bytes (256 * RGB)
+let gridWidth = 0;
+let gridHeight = 0;
+let imageData = null; // ImageData for current frame
 
 // Zoom/pan state
 let zoom = 1;
@@ -29,7 +32,7 @@ function connect() {
 
     ws.onmessage = (event) => {
         if (event.data instanceof ArrayBuffer) {
-            renderFrame(event.data);
+            handleBinary(new Uint8Array(event.data));
         } else {
             const msg = JSON.parse(event.data);
             handleMessage(msg);
@@ -37,33 +40,84 @@ function connect() {
     };
 }
 
-function renderFrame(buffer) {
-    const blob = new Blob([buffer], { type: "image/jpeg" });
-    createImageBitmap(blob).then((bmp) => {
-        currentFrame = bmp;
-        drawFrame();
-    });
+function handleBinary(data) {
+    const type = data[0];
+
+    if (type === 0x01) {
+        // Palette: 1 byte type + 768 bytes RGB
+        palette = data.slice(1);
+    } else if (type === 0x02) {
+        // Frame: 1 byte type + 2 bytes width + 2 bytes height + pixel data
+        const view = new DataView(data.buffer, data.byteOffset);
+        const w = view.getUint16(1);
+        const h = view.getUint16(3);
+        const pixels = data.slice(5);
+        renderGrid(w, h, pixels);
+    }
+}
+
+function renderGrid(w, h, pixels) {
+    if (!palette) return;
+
+    gridWidth = w;
+    gridHeight = h;
+
+    // Create or reuse ImageData
+    if (!imageData || imageData.width !== w || imageData.height !== h) {
+        imageData = new ImageData(w, h);
+    }
+
+    const rgba = imageData.data;
+
+    // Apply palette lookup: each pixel byte -> RGB from palette
+    for (let i = 0; i < pixels.length; i++) {
+        const idx = pixels[i] * 3;
+        const out = i * 4;
+        rgba[out] = palette[idx];
+        rgba[out + 1] = palette[idx + 1];
+        rgba[out + 2] = palette[idx + 2];
+        rgba[out + 3] = 255;
+    }
+
+    drawFrame();
 }
 
 function drawFrame() {
-    if (!currentFrame) return;
-
-    // Canvas fills the container
     const wrap = canvas.parentElement;
     canvas.width = wrap.clientWidth;
     canvas.height = wrap.clientHeight;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!imageData) return;
+
+    // Create a temporary canvas to hold the ImageData so we can drawImage with scaling
+    const tmp = document.createElement("canvas");
+    tmp.width = gridWidth;
+    tmp.height = gridHeight;
+    tmp.getContext("2d").putImageData(imageData, 0, 0);
+
+    // Calculate fit scale to fill canvas with margin
+    const scaleX = canvas.width / gridWidth;
+    const scaleY = canvas.height / gridHeight;
+    const fitScale = Math.min(scaleX, scaleY) * 0.95;
+
     ctx.save();
 
-    // Apply zoom and pan
-    ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
-    ctx.scale(zoom, zoom);
+    // Set interpolation mode based on simulation
+    if (simInfo && simInfo.pixelated) {
+        ctx.imageSmoothingEnabled = false;
+    } else {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+    }
 
-    // Center the image
-    const drawW = currentFrame.width;
-    const drawH = currentFrame.height;
-    ctx.drawImage(currentFrame, -drawW / 2, -drawH / 2, drawW, drawH);
+    // Apply zoom and pan from canvas center
+    ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
+    ctx.scale(zoom * fitScale, zoom * fitScale);
+
+    // Draw centered
+    ctx.drawImage(tmp, -gridWidth / 2, -gridHeight / 2);
 
     ctx.restore();
 }
@@ -72,10 +126,11 @@ function handleMessage(msg) {
     if (msg.type === "sim_info") {
         simInfo = msg.data;
         updateSimUI(msg.data);
-        // Reset zoom/pan on sim switch
         zoom = 1;
         panX = 0;
         panY = 0;
+        document.getElementById("status-bar").textContent =
+            `${msg.data.name} | ${msg.data.width}x${msg.data.height}`;
     } else if (msg.type === "metrics") {
         updateMetrics(msg.data);
     } else if (msg.type === "status") {
@@ -90,12 +145,6 @@ function handleMessage(msg) {
 }
 
 function updateSimUI(info) {
-    if (info.pixelated) {
-        canvas.classList.add("pixelated");
-    } else {
-        canvas.classList.remove("pixelated");
-    }
-
     const container = document.getElementById("params-container");
     container.innerHTML = "";
     for (const [key, param] of Object.entries(info.params || {})) {
@@ -161,17 +210,19 @@ function sendParams() {
     send({ type: "set_params", params });
 }
 
-// Convert canvas pixel coordinates to grid coordinates, accounting for zoom/pan
 function canvasToGrid(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
     const cx = clientX - rect.left;
     const cy = clientY - rect.top;
 
-    if (!currentFrame) return { row: 0, col: 0 };
+    if (!gridWidth || !gridHeight) return { row: 0, col: 0 };
 
-    // Reverse the transform: canvas center + pan, then scale
-    const gx = (cx - canvas.width / 2 - panX) / zoom + currentFrame.width / 2;
-    const gy = (cy - canvas.height / 2 - panY) / zoom + currentFrame.height / 2;
+    const scaleX = canvas.width / gridWidth;
+    const scaleY = canvas.height / gridHeight;
+    const fitScale = Math.min(scaleX, scaleY) * 0.95;
+
+    const gx = (cx - canvas.width / 2 - panX) / (zoom * fitScale) + gridWidth / 2;
+    const gy = (cy - canvas.height / 2 - panY) / (zoom * fitScale) + gridHeight / 2;
 
     return { row: Math.floor(gy), col: Math.floor(gx) };
 }
@@ -247,20 +298,17 @@ canvas.addEventListener("wheel", (e) => {
     drawFrame();
 }, { passive: false });
 
-// Pan with middle mouse or shift+click drag
+// Pan with shift+drag or middle mouse drag
 canvas.addEventListener("mousedown", (e) => {
     if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
-        // Middle click or shift+left click: start panning
         isPanning = true;
         lastPanX = e.clientX;
         lastPanY = e.clientY;
         e.preventDefault();
     } else if (e.button === 0 && !e.shiftKey) {
-        // Left click: perturb
         const { row, col } = canvasToGrid(e.clientX, e.clientY);
         send({ type: "perturb", row, col, channel: 0, value: 1.0, radius: 3 });
     } else if (e.button === 2) {
-        // Right click: erase
         const { row, col } = canvasToGrid(e.clientX, e.clientY);
         send({ type: "perturb", row, col, channel: 0, value: 0.0, radius: 3 });
     }
@@ -288,7 +336,6 @@ canvas.addEventListener("mouseleave", () => {
 
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
-// Redraw on window resize
 window.addEventListener("resize", drawFrame);
 
 connect();

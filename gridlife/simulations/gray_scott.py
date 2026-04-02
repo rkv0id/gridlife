@@ -65,14 +65,23 @@ class GrayScott(Simulation):
         grid = torch.zeros(2, height, width, device=device)
         grid[0] = 1.0
 
-        cy, cx = height // 2, width // 2
-        size = max(4, min(height, width) // 16)
-        y0, y1 = cy - size, cy + size
-        x0, x1 = cx - size, cx + size
-        grid[1, y0:y1, x0:x1] = 0.5
-        grid[1, y0:y1, x0:x1] += torch.rand(y1 - y0, x1 - x0, device=device) * 0.1
-        grid[1].clamp_(0, 1)
+        # Multiple seed points for faster pattern development
+        size = max(6, min(height, width) // 10)
+        seeds = [
+            (height // 2, width // 2),
+            (height // 3, width // 3),
+            (height // 3, 2 * width // 3),
+            (2 * height // 3, width // 3),
+            (2 * height // 3, 2 * width // 3),
+        ]
+        for cy, cx in seeds:
+            y0 = max(0, cy - size // 2)
+            y1 = min(height, cy + size // 2)
+            x0 = max(0, cx - size // 2)
+            x1 = min(width, cx + size // 2)
+            grid[1, y0:y1, x0:x1] = 0.5 + torch.rand(y1 - y0, x1 - x0, device=device) * 0.1
 
+        grid[1].clamp_(0, 1)
         return grid
 
     def render_channel(self) -> int:

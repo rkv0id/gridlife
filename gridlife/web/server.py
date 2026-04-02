@@ -13,7 +13,7 @@ from gridlife.engine.coordinator import Coordinator
 from gridlife.simulations.base import Simulation
 from gridlife.simulations.game_of_life import GameOfLife
 from gridlife.simulations.gray_scott import GrayScott
-from gridlife.viz.encoder import encode_frame_jpeg
+from gridlife.viz.encoder import encode_frame_message, encode_palette_message
 
 logger = logging.getLogger("gridlife.web")
 
@@ -80,25 +80,27 @@ class SimulationServer:
             gpu=self.gpu,
         )
 
+    def _get_palette_bytes(self) -> bytes:
+        """Get the current simulation's palette as raw bytes (256 * 3 = 768 bytes)."""
+        if self.simulation is None:
+            return b"\x00" * 768
+        return self.simulation.palette().numpy().tobytes()
+
     def collect_frame(self) -> bytes:
         """
-        Gather rendered RGB strips from all workers, concatenate them
-        vertically, and JPEG-encode the result for the browser.
+        Gather rendered uint8 strips from all workers, concatenate,
+        and wrap in a binary frame message.
         """
         if self.coordinator is None or self.simulation is None:
             return b""
 
         strips_bytes = ray.get([w.render.remote() for w in self.coordinator.workers])
 
-        row_ranges = self.coordinator.row_ranges
-        strip_heights = [end - start for start, end in row_ranges]
-
-        full_rgb = b""
+        raw = b""
         for strip_b in strips_bytes:
-            full_rgb += strip_b
+            raw += strip_b
 
-        total_height = sum(strip_heights)
-        return encode_frame_jpeg(full_rgb, self.width, total_height)
+        return encode_frame_message(raw, self.width, self.height)
 
     async def step_loop(self) -> None:
         """
@@ -193,6 +195,25 @@ class SimulationServer:
         for ws in disconnected:
             self.clients.remove(ws)
 
+    async def send_palette(self, ws: WebSocket | None = None) -> None:
+        """Send palette to one client or broadcast to all."""
+        msg = encode_palette_message(self._get_palette_bytes())
+        if ws is not None:
+            await ws.send_bytes(msg)
+        else:
+            await self._broadcast_binary(msg)
+
+    async def _send_frame(self) -> None:
+        """Render and broadcast a single frame. Used after reset, sim switch, repartition."""
+        try:
+            frame = self.collect_frame()
+            await self._broadcast_binary(frame)
+            if self.coordinator:
+                metrics = self.coordinator.get_metrics()
+                await self._broadcast_json({"type": "metrics", "data": metrics})
+        except Exception as e:
+            logger.error(f"Frame send error: {e}")
+
     async def handle_message(self, msg: dict[str, Any]) -> None:
         """
         Route an incoming WebSocket control message to the appropriate handler.
@@ -234,6 +255,7 @@ class SimulationServer:
                     "data": self.sim_info(),
                 }
             )
+            await self.send_palette()
             await self._send_frame()
 
         elif msg_type == "reset":
@@ -260,17 +282,6 @@ class SimulationServer:
                     )
                     break
 
-    async def _send_frame(self) -> None:
-        """Render and broadcast a single frame. Used after reset, sim switch, repartition."""
-        try:
-            frame = self.collect_frame()
-            await self._broadcast_binary(frame)
-            if self.coordinator:
-                metrics = self.coordinator.get_metrics()
-                await self._broadcast_json({"type": "metrics", "data": metrics})
-        except Exception as e:
-            logger.error(f"Frame send error: {e}")
-
     def sim_info(self) -> dict[str, Any]:
         """Serialize current simulation metadata for the browser client."""
         if self.simulation is None:
@@ -279,6 +290,8 @@ class SimulationServer:
             "name": self.simulation.name,
             "description": self.simulation.description,
             "channels": self.simulation.channels,
+            "width": self.width,
+            "height": self.height,
             "params": {
                 k: {
                     "default": v.default,
@@ -343,7 +356,7 @@ def create_app(server: SimulationServer) -> FastAPI:
         await ws.accept()
         server.clients.append(ws)
 
-        # Send simulation info on connect so the client can build its UI
+        # Send simulation info, palette, and initial frame on connect
         await ws.send_text(
             json.dumps(
                 {
@@ -352,6 +365,12 @@ def create_app(server: SimulationServer) -> FastAPI:
                 }
             )
         )
+        await server.send_palette(ws)
+        try:
+            frame = server.collect_frame()
+            await ws.send_bytes(frame)
+        except Exception:
+            pass
 
         try:
             while True:
