@@ -26,7 +26,13 @@ SIMULATIONS: dict[str, type[Simulation]] = {
 
 
 class SimulationServer:
-    """Manages the simulation lifecycle and WebSocket streaming."""
+    """
+    Bridges the browser UI and the distributed simulation engine.
+
+    Owns the Coordinator, manages the step/render loop, handles
+    WebSocket clients, and routes control messages (play, pause,
+    parameter changes, repartitioning, perturbation).
+    """
 
     def __init__(
         self,
@@ -37,6 +43,7 @@ class SimulationServer:
         gpu: bool,
         render_fps: int,
         render_resolution: int,
+        throttle: bool = True,
     ) -> None:
         self.width = width
         self.height = height
@@ -44,6 +51,7 @@ class SimulationServer:
         self.gpu = gpu
         self.render_fps = render_fps
         self.render_resolution = render_resolution
+        self.throttle = throttle
 
         self.coordinator: Coordinator | None = None
         self.simulation: Simulation | None = None
@@ -53,6 +61,7 @@ class SimulationServer:
         self._init_simulation(sim_name)
 
     def _init_simulation(self, sim_name: str) -> None:
+        """Tear down any existing simulation and bootstrap a new one."""
         if self.coordinator is not None:
             self.coordinator.shutdown()
 
@@ -70,7 +79,10 @@ class SimulationServer:
         )
 
     def collect_frame(self) -> bytes:
-        """Collect rendered strips from workers and encode as JPEG."""
+        """
+        Gather rendered RGB strips from all workers, concatenate them
+        vertically, and JPEG-encode the result for the browser.
+        """
         if self.coordinator is None or self.simulation is None:
             return b""
 
@@ -87,31 +99,48 @@ class SimulationServer:
         return encode_frame_jpeg(full_rgb, self.width, total_height)
 
     async def step_loop(self) -> None:
-        """Main simulation + render loop."""
-        render_interval = max(1, 100 // self.render_fps)
-        step_in_batch = 0
+        """
+        Async loop that drives simulation stepping and frame rendering.
+
+        When throttled (default), batches steps between frames and sleeps to
+        hit the target FPS. When unthrottled (--max-speed), runs as fast as
+        possible with a minimal yield to keep the event loop alive.
+        """
+        target_frame_time = 1.0 / self.render_fps
+        steps_per_frame = max(1, 100 // self.render_fps)
 
         while self.running:
             if self.coordinator is None:
                 await asyncio.sleep(0.1)
                 continue
 
-            self.coordinator.do_step()
-            step_in_batch += 1
+            frame_start = asyncio.get_event_loop().time()
 
-            if step_in_batch >= render_interval:
-                step_in_batch = 0
-                try:
-                    frame = self.collect_frame()
-                    await self._broadcast_binary(frame)
-                    metrics = self.coordinator.get_metrics()
-                    await self._broadcast_json({"type": "metrics", "data": metrics})
-                except Exception as e:
-                    logger.error(f"Frame collection error: {e}")
+            for _ in range(steps_per_frame):
+                if not self.running:
+                    break
+                self.coordinator.do_step()
 
-            await asyncio.sleep(0)
+            try:
+                frame = self.collect_frame()
+                await self._broadcast_binary(frame)
+                metrics = self.coordinator.get_metrics()
+                await self._broadcast_json({"type": "metrics", "data": metrics})
+            except Exception as e:
+                logger.error(f"Frame collection error: {e}")
+
+            if self.throttle:
+                elapsed = asyncio.get_event_loop().time() - frame_start
+                sleep_time = target_frame_time - elapsed
+                if sleep_time > 0:
+                    await asyncio.sleep(sleep_time)
+                else:
+                    await asyncio.sleep(0.001)
+            else:
+                await asyncio.sleep(0)
 
     async def _broadcast_binary(self, data: bytes) -> None:
+        """Send binary data to all WebSocket clients, removing any that have disconnected."""
         disconnected = []
         for ws in self.clients:
             try:
@@ -122,6 +151,7 @@ class SimulationServer:
             self.clients.remove(ws)
 
     async def _broadcast_json(self, data: dict[str, Any]) -> None:
+        """Send JSON data to all WebSocket clients, removing any that have disconnected."""
         disconnected = []
         for ws in self.clients:
             try:
@@ -132,6 +162,11 @@ class SimulationServer:
             self.clients.remove(ws)
 
     async def handle_message(self, msg: dict[str, Any]) -> None:
+        """
+        Route an incoming WebSocket control message to the appropriate handler.
+        Messages are JSON with a "type" field. Supported types:
+        play, pause, set_params, set_workers, switch_sim, reset, perturb.
+        """
         msg_type = msg.get("type")
 
         if msg_type == "play":
@@ -149,7 +184,7 @@ class SimulationServer:
         elif msg_type == "set_workers" and self.coordinator is not None:
             count = msg.get("count", self.num_workers)
             self.running = False
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.05)  # let step loop finish current iteration
             self.coordinator.repartition(count)
             self.num_workers = count
 
@@ -178,6 +213,7 @@ class SimulationServer:
             channel = msg.get("channel", 0)
             value = msg.get("value", 1.0)
             radius = msg.get("radius", 3)
+            # Route to the worker that owns this row
             for i, (start, end) in enumerate(self.coordinator.row_ranges):
                 if start <= row < end:
                     local_row = row - start
@@ -189,6 +225,7 @@ class SimulationServer:
                     break
 
     def sim_info(self) -> dict[str, Any]:
+        """Serialize current simulation metadata for the browser client."""
         if self.simulation is None:
             return {}
         return {
@@ -210,6 +247,7 @@ class SimulationServer:
         }
 
     def get_simulations_list(self) -> list[dict[str, Any]]:
+        """Return metadata for all registered simulations (for the sim selector dropdown)."""
         result = []
         for _name, cls in SIMULATIONS.items():
             sim = cls()
@@ -230,6 +268,10 @@ class SimulationServer:
 
 
 def create_app(server: SimulationServer) -> FastAPI:
+    """
+    Build the FastAPI application. Registers HTTP routes for static files
+    and API endpoints, plus the WebSocket endpoint for live streaming.
+    """
     app = FastAPI(title="gridlife")
 
     @app.get("/")
@@ -254,6 +296,7 @@ def create_app(server: SimulationServer) -> FastAPI:
         await ws.accept()
         server.clients.append(ws)
 
+        # Send simulation info on connect so the client can build its UI
         await ws.send_text(
             json.dumps(
                 {
