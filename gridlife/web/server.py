@@ -100,29 +100,43 @@ class SimulationServer:
 
     async def step_loop(self) -> None:
         """
-        Async loop that drives simulation stepping and frame rendering.
-
-        When throttled (default), batches steps between frames and sleeps to
-        hit the target FPS. When unthrottled (--max-speed), runs as fast as
-        possible with a minimal yield to keep the event loop alive.
+        Runs simulation steps in a background thread to avoid blocking
+        the asyncio event loop. The event loop stays responsive for
+        WebSocket control messages (pause, param changes, etc).
         """
+        import concurrent.futures
+
+        loop = asyncio.get_event_loop()
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
         target_frame_time = 1.0 / self.render_fps
         steps_per_frame = max(1, 100 // self.render_fps)
+
+        def run_batch() -> None:
+            """Blocking work that runs in the thread pool."""
+            if self.coordinator is None:
+                return
+            for _ in range(steps_per_frame):
+                if not self.running:
+                    break
+                self.coordinator.do_step()
 
         while self.running:
             if self.coordinator is None:
                 await asyncio.sleep(0.1)
                 continue
 
-            frame_start = asyncio.get_event_loop().time()
+            frame_start = loop.time()
 
-            for _ in range(steps_per_frame):
-                if not self.running:
-                    break
-                self.coordinator.do_step()
+            # Run the blocking Ray calls in a thread so we don't freeze the event loop
+            await loop.run_in_executor(executor, run_batch)
 
+            if not self.running:
+                break
+
+            # Render and broadcast (also blocking, but fast)
             try:
-                frame = self.collect_frame()
+                frame = await loop.run_in_executor(executor, self.collect_frame)
                 await self._broadcast_binary(frame)
                 metrics = self.coordinator.get_metrics()
                 await self._broadcast_json({"type": "metrics", "data": metrics})
@@ -130,7 +144,7 @@ class SimulationServer:
                 logger.error(f"Frame collection error: {e}")
 
             if self.throttle:
-                elapsed = asyncio.get_event_loop().time() - frame_start
+                elapsed = loop.time() - frame_start
                 sleep_time = target_frame_time - elapsed
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
@@ -138,6 +152,8 @@ class SimulationServer:
                     await asyncio.sleep(0.001)
             else:
                 await asyncio.sleep(0)
+
+        executor.shutdown(wait=False)
 
     async def _broadcast_binary(self, data: bytes) -> None:
         """Send binary data to all WebSocket clients, removing any that have disconnected."""

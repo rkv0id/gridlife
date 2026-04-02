@@ -1,10 +1,14 @@
+from __future__ import annotations
+
 import time
+from typing import TYPE_CHECKING
 
 import ray
-import torch
-import torch.nn.functional as F
 
 from gridlife.simulations.base import Simulation
+
+if TYPE_CHECKING:
+    import torch
 
 
 @ray.remote
@@ -27,6 +31,8 @@ class StripWorker:
         strip_data: torch.Tensor,
         row_offset: int,
     ) -> None:
+        import torch
+
         self.worker_id = worker_id
         self.simulation = simulation
         self.row_offset = row_offset
@@ -67,6 +73,8 @@ class StripWorker:
         calls the simulation's step function, and writes the result
         back into the owned interior of the buffer.
         """
+        import torch.nn.functional as F
+
         t0 = time.perf_counter()
         h = self.halo_size
 
@@ -112,6 +120,8 @@ class StripWorker:
 
     def set_strip_data(self, data: torch.Tensor, row_offset: int) -> None:
         """Replace this worker's grid after repartitioning. Reallocates the buffer."""
+        import torch
+
         h = self.halo_size
         self.owned_height = data.shape[1]
         self.row_offset = row_offset
