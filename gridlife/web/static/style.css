@@ -1,0 +1,156 @@
+:root {
+    --bg: #0a0a0a;
+    --bg2: #141414;
+    --fg: #e0e0e0;
+    --fg2: #888;
+    --accent: #4fc3f7;
+    --border: #2a2a2a;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    height: 100vh;
+    overflow: hidden;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.controls-top {
+    display: flex;
+    gap: 6px;
+}
+
+button {
+    background: var(--bg2);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 4px 12px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+}
+
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: 0.4; cursor: default; }
+
+.main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+.canvas-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: #000;
+}
+
+canvas {
+    max-width: 100%;
+    max-height: 100%;
+    image-rendering: auto;
+}
+
+canvas.pixelated {
+    image-rendering: pixelated;
+}
+
+.sidebar {
+    width: 240px;
+    border-left: 1px solid var(--border);
+    padding: 12px;
+    overflow-y: auto;
+    background: var(--bg2);
+}
+
+.sidebar section {
+    margin-bottom: 16px;
+}
+
+.sidebar label {
+    display: block;
+    font-size: 11px;
+    color: var(--fg2);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+select {
+    width: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 4px;
+    font-family: inherit;
+    font-size: 12px;
+}
+
+.param-row {
+    margin-bottom: 8px;
+}
+
+.param-row .param-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    margin-bottom: 2px;
+}
+
+.param-row .param-label span:last-child {
+    color: var(--accent);
+}
+
+input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent);
+}
+
+.worker-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.worker-control input { flex: 1; }
+.worker-control span { color: var(--accent); min-width: 16px; }
+
+.metrics div {
+    margin-bottom: 2px;
+    color: var(--fg2);
+}
+
+.metrics span { color: var(--fg); }
+
+footer {
+    padding: 4px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--fg2);
+}

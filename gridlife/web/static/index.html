@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>gridlife</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>gridlife</h1>
+            <div class="controls-top">
+                <button id="btn-play">Play</button>
+                <button id="btn-pause" disabled>Pause</button>
+                <button id="btn-reset">Reset</button>
+            </div>
+        </header>
+        <div class="main">
+            <div class="canvas-wrap">
+                <canvas id="canvas"></canvas>
+            </div>
+            <aside class="sidebar">
+                <section>
+                    <label>Simulation</label>
+                    <select id="sim-select"></select>
+                </section>
+                <section id="presets-section" style="display:none">
+                    <label>Preset</label>
+                    <select id="preset-select"></select>
+                </section>
+                <section id="params-section">
+                    <label>Parameters</label>
+                    <div id="params-container"></div>
+                </section>
+                <section>
+                    <label>Workers</label>
+                    <div class="worker-control">
+                        <input type="range" id="worker-slider" min="1" max="8" value="2">
+                        <span id="worker-count">2</span>
+                    </div>
+                </section>
+                <section>
+                    <label>Performance</label>
+                    <div id="metrics" class="metrics">
+                        <div>step: <span id="m-step">-</span>ms</div>
+                        <div>halo: <span id="m-halo">-</span>ms</div>
+                        <div>steps: <span id="m-steps">0</span></div>
+                    </div>
+                </section>
+            </aside>
+        </div>
+        <footer>
+            <span id="status-bar">disconnected</span>
+        </footer>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>
