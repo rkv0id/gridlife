@@ -3,6 +3,15 @@ const ctx = canvas.getContext("2d");
 
 let ws = null;
 let simInfo = null;
+let currentFrame = null;
+
+// Zoom/pan state
+let zoom = 1;
+let panX = 0;
+let panY = 0;
+let isPanning = false;
+let lastPanX = 0;
+let lastPanY = 0;
 
 function connect() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -31,16 +40,42 @@ function connect() {
 function renderFrame(buffer) {
     const blob = new Blob([buffer], { type: "image/jpeg" });
     createImageBitmap(blob).then((bmp) => {
-        canvas.width = bmp.width;
-        canvas.height = bmp.height;
-        ctx.drawImage(bmp, 0, 0);
+        currentFrame = bmp;
+        drawFrame();
     });
+}
+
+function drawFrame() {
+    if (!currentFrame) return;
+
+    // Canvas fills the container
+    const wrap = canvas.parentElement;
+    canvas.width = wrap.clientWidth;
+    canvas.height = wrap.clientHeight;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+
+    // Apply zoom and pan
+    ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
+    ctx.scale(zoom, zoom);
+
+    // Center the image
+    const drawW = currentFrame.width;
+    const drawH = currentFrame.height;
+    ctx.drawImage(currentFrame, -drawW / 2, -drawH / 2, drawW, drawH);
+
+    ctx.restore();
 }
 
 function handleMessage(msg) {
     if (msg.type === "sim_info") {
         simInfo = msg.data;
         updateSimUI(msg.data);
+        // Reset zoom/pan on sim switch
+        zoom = 1;
+        panX = 0;
+        panY = 0;
     } else if (msg.type === "metrics") {
         updateMetrics(msg.data);
     } else if (msg.type === "status") {
@@ -61,7 +96,6 @@ function updateSimUI(info) {
         canvas.classList.remove("pixelated");
     }
 
-    // Build param sliders
     const container = document.getElementById("params-container");
     container.innerHTML = "";
     for (const [key, param] of Object.entries(info.params || {})) {
@@ -89,7 +123,6 @@ function updateSimUI(info) {
         container.appendChild(row);
     }
 
-    // Build presets
     const presetsSection = document.getElementById("presets-section");
     const presetSelect = document.getElementById("preset-select");
     if (info.presets && Object.keys(info.presets).length > 0) {
@@ -126,6 +159,21 @@ function sendParams() {
         params[key] = val;
     });
     send({ type: "set_params", params });
+}
+
+// Convert canvas pixel coordinates to grid coordinates, accounting for zoom/pan
+function canvasToGrid(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const cx = clientX - rect.left;
+    const cy = clientY - rect.top;
+
+    if (!currentFrame) return { row: 0, col: 0 };
+
+    // Reverse the transform: canvas center + pan, then scale
+    const gx = (cx - canvas.width / 2 - panX) / zoom + currentFrame.width / 2;
+    const gy = (cy - canvas.height / 2 - panY) / zoom + currentFrame.height / 2;
+
+    return { row: Math.floor(gy), col: Math.floor(gx) };
 }
 
 // Buttons
@@ -190,17 +238,57 @@ workerSlider.addEventListener("input", () => {
     workerCount.textContent = workerSlider.value;
 });
 
-// Canvas click to perturb
+// Zoom with scroll wheel
+canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    zoom *= zoomFactor;
+    zoom = Math.max(0.1, Math.min(50, zoom));
+    drawFrame();
+}, { passive: false });
+
+// Pan with middle mouse or shift+click drag
 canvas.addEventListener("mousedown", (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const col = Math.floor((e.clientX - rect.left) * scaleX);
-    const row = Math.floor((e.clientY - rect.top) * scaleY);
-    const value = e.button === 2 ? 0.0 : 1.0;
-    send({ type: "perturb", row, col, channel: 0, value, radius: 3 });
+    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+        // Middle click or shift+left click: start panning
+        isPanning = true;
+        lastPanX = e.clientX;
+        lastPanY = e.clientY;
+        e.preventDefault();
+    } else if (e.button === 0 && !e.shiftKey) {
+        // Left click: perturb
+        const { row, col } = canvasToGrid(e.clientX, e.clientY);
+        send({ type: "perturb", row, col, channel: 0, value: 1.0, radius: 3 });
+    } else if (e.button === 2) {
+        // Right click: erase
+        const { row, col } = canvasToGrid(e.clientX, e.clientY);
+        send({ type: "perturb", row, col, channel: 0, value: 0.0, radius: 3 });
+    }
+});
+
+canvas.addEventListener("mousemove", (e) => {
+    if (isPanning) {
+        panX += e.clientX - lastPanX;
+        panY += e.clientY - lastPanY;
+        lastPanX = e.clientX;
+        lastPanY = e.clientY;
+        drawFrame();
+    }
+});
+
+canvas.addEventListener("mouseup", (e) => {
+    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+        isPanning = false;
+    }
+});
+
+canvas.addEventListener("mouseleave", () => {
+    isPanning = false;
 });
 
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+// Redraw on window resize
+window.addEventListener("resize", drawFrame);
 
 connect();

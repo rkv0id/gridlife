@@ -218,9 +218,10 @@ class SimulationServer:
         elif msg_type == "set_workers" and self.coordinator is not None:
             count = msg.get("count", self.num_workers)
             self.running = False
-            await asyncio.sleep(0.05)  # let step loop finish current iteration
+            await asyncio.sleep(0.05)
             self.coordinator.repartition(count)
             self.num_workers = count
+            await self._send_frame()
 
         elif msg_type == "switch_sim":
             sim_name = msg.get("name", "game_of_life")
@@ -233,6 +234,7 @@ class SimulationServer:
                     "data": self.sim_info(),
                 }
             )
+            await self._send_frame()
 
         elif msg_type == "reset":
             self.running = False
@@ -240,6 +242,7 @@ class SimulationServer:
             if self.simulation is not None:
                 sim_name = self.simulation.name
                 self._init_simulation(sim_name)
+            await self._send_frame()
 
         elif msg_type == "perturb" and self.coordinator is not None:
             row = msg.get("row", 0)
@@ -247,7 +250,6 @@ class SimulationServer:
             channel = msg.get("channel", 0)
             value = msg.get("value", 1.0)
             radius = msg.get("radius", 3)
-            # Route to the worker that owns this row
             for i, (start, end) in enumerate(self.coordinator.row_ranges):
                 if start <= row < end:
                     local_row = row - start
@@ -257,6 +259,17 @@ class SimulationServer:
                         )
                     )
                     break
+
+    async def _send_frame(self) -> None:
+        """Render and broadcast a single frame. Used after reset, sim switch, repartition."""
+        try:
+            frame = self.collect_frame()
+            await self._broadcast_binary(frame)
+            if self.coordinator:
+                metrics = self.coordinator.get_metrics()
+                await self._broadcast_json({"type": "metrics", "data": metrics})
+        except Exception as e:
+            logger.error(f"Frame send error: {e}")
 
     def sim_info(self) -> dict[str, Any]:
         """Serialize current simulation metadata for the browser client."""
