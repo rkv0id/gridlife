@@ -15,6 +15,7 @@ def serve(
     render_res: int = typer.Option(1024, help="Max render resolution"),
     gpu: bool = typer.Option(False, help="Request GPU workers (CUDA only)"),
     max_speed: bool = typer.Option(False, help="No throttling, run as fast as possible"),
+    steps_per_run: int = typer.Option(500, help="Steps per play cycle (0 for unlimited)"),
 ) -> None:
     """Start the simulation engine with web UI."""
     import os
@@ -42,6 +43,7 @@ def serve(
         render_fps=render_fps,
         render_resolution=render_res,
         throttle=not max_speed,
+        steps_per_run=steps_per_run,
     )
 
     fastapi_app = create_app(server)
@@ -61,6 +63,10 @@ def serve(
 
     typer.echo(f"Starting gridlife at http://{host}:{port}")
     typer.echo(f"Simulation: {sim} ({width}x{height}), {workers} workers")
+    if steps_per_run > 0:
+        typer.echo(f"Steps per play cycle: {steps_per_run} (click Play again to continue)")
+    else:
+        typer.echo("Unlimited steps per play cycle")
     if max_speed:
         typer.echo("Throttling disabled - running at max speed")
     uvicorn.run(fastapi_app, host=host, port=port, log_level="warning")

@@ -44,6 +44,7 @@ class SimulationServer:
         render_fps: int,
         render_resolution: int,
         throttle: bool = True,
+        steps_per_run: int = 500,
     ) -> None:
         self.width = width
         self.height = height
@@ -52,6 +53,7 @@ class SimulationServer:
         self.render_fps = render_fps
         self.render_resolution = render_resolution
         self.throttle = throttle
+        self.steps_per_run = steps_per_run
 
         self.coordinator: Coordinator | None = None
         self.simulation: Simulation | None = None
@@ -101,8 +103,8 @@ class SimulationServer:
     async def step_loop(self) -> None:
         """
         Runs simulation steps in a background thread to avoid blocking
-        the asyncio event loop. The event loop stays responsive for
-        WebSocket control messages (pause, param changes, etc).
+        the asyncio event loop. Stops after steps_per_run steps (if set)
+        or when paused. User clicks Play again to run another batch.
         """
         import concurrent.futures
 
@@ -111,15 +113,20 @@ class SimulationServer:
 
         target_frame_time = 1.0 / self.render_fps
         steps_per_frame = max(1, 100 // self.render_fps)
+        steps_done = 0
+        unlimited = self.steps_per_run == 0
 
-        def run_batch() -> None:
+        def run_batch() -> int:
             """Blocking work that runs in the thread pool."""
             if self.coordinator is None:
-                return
+                return 0
+            count = 0
             for _ in range(steps_per_frame):
                 if not self.running:
                     break
                 self.coordinator.do_step()
+                count += 1
+            return count
 
         while self.running:
             if self.coordinator is None:
@@ -128,13 +135,22 @@ class SimulationServer:
 
             frame_start = loop.time()
 
-            # Run the blocking Ray calls in a thread so we don't freeze the event loop
-            await loop.run_in_executor(executor, run_batch)
+            batch_count = await loop.run_in_executor(executor, run_batch)
+            steps_done += batch_count
 
             if not self.running:
                 break
 
-            # Render and broadcast (also blocking, but fast)
+            # Check step limit
+            if not unlimited and steps_done >= self.steps_per_run:
+                self.running = False
+                await self._broadcast_json(
+                    {
+                        "type": "status",
+                        "data": {"paused": True, "reason": "step_limit"},
+                    }
+                )
+
             try:
                 frame = await loop.run_in_executor(executor, self.collect_frame)
                 await self._broadcast_binary(frame)
@@ -189,9 +205,11 @@ class SimulationServer:
             if not self.running:
                 self.running = True
                 asyncio.create_task(self.step_loop())
+                await self._broadcast_json({"type": "status", "data": {"paused": False}})
 
         elif msg_type == "pause":
             self.running = False
+            await self._broadcast_json({"type": "status", "data": {"paused": True}})
 
         elif msg_type == "set_params" and self.coordinator is not None:
             params = msg.get("params", {})

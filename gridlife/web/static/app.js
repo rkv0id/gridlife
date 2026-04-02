@@ -43,11 +43,18 @@ function handleMessage(msg) {
         updateSimUI(msg.data);
     } else if (msg.type === "metrics") {
         updateMetrics(msg.data);
+    } else if (msg.type === "status") {
+        if (msg.data.paused) {
+            document.getElementById("btn-play").disabled = false;
+            document.getElementById("btn-pause").disabled = true;
+        } else {
+            document.getElementById("btn-play").disabled = true;
+            document.getElementById("btn-pause").disabled = false;
+        }
     }
 }
 
 function updateSimUI(info) {
-    // Set canvas interpolation mode
     if (info.pixelated) {
         canvas.classList.add("pixelated");
     } else {
@@ -160,7 +167,6 @@ document.getElementById("preset-select").addEventListener("change", (e) => {
     const preset = simInfo.presets[e.target.value];
     if (!preset) return;
 
-    // Update sliders
     document.querySelectorAll("#params-container .param-row").forEach((row) => {
         const key = row.querySelector(".param-label span").textContent;
         if (key in preset) {
