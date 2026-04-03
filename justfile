@@ -4,8 +4,13 @@ default:
 install:
     uv sync
 
+# Local mode (default, no Ray)
 serve *ARGS:
     .venv/bin/gridlife serve {{ARGS}}
+
+# Local Ray mode (for testing Ray behavior)
+serve-ray *ARGS:
+    .venv/bin/gridlife serve --local-ray {{ARGS}}
 
 test *ARGS:
     uv run pytest {{ARGS}}

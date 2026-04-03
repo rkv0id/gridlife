@@ -15,6 +15,7 @@ def serve(
     max_speed: bool = typer.Option(False, help="No throttling, run as fast as possible"),
     steps_per_run: int = typer.Option(1000, help="Steps per play cycle (0 for unlimited)"),
     ray_address: str | None = typer.Option(None, help="Ray cluster address for distributed mode"),
+    local_ray: bool = typer.Option(False, help="Use Ray actors locally (for testing Ray behavior)"),
 ) -> None:
     """Start the simulation engine with web UI."""
     import signal
@@ -24,8 +25,9 @@ def serve(
     from gridlife.web.server import SimulationServer, create_app
 
     coordinator_factory = None
+    use_ray = ray_address is not None or local_ray
 
-    if ray_address is not None:
+    if use_ray:
         import os
 
         os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
@@ -34,8 +36,14 @@ def serve(
 
         from gridlife.engine.ray_pool import RayWorkerPool
 
-        ray.init(address=ray_address, ignore_reinit_error=True)
-        typer.echo(f"Connected to Ray cluster: {ray.cluster_resources()}")
+        if ray_address:
+            ray.init(address=ray_address, ignore_reinit_error=True)
+            typer.echo(f"Connected to Ray cluster: {ray.cluster_resources()}")
+        else:
+            available_cpus = os.cpu_count() or 4
+            max_ray_cpus = max(2, available_cpus - 2)
+            ray.init(num_cpus=max_ray_cpus, ignore_reinit_error=True)
+            typer.echo(f"Local Ray mode: {max_ray_cpus} CPUs (reserving 2 for system)")
 
         def make_coordinator(simulation):  # type: ignore[no-untyped-def]
             from gridlife.engine.coordinator import Coordinator
@@ -65,7 +73,7 @@ def serve(
         server.running = False
         if server.coordinator:
             server.coordinator.shutdown()
-        if ray_address is not None:
+        if use_ray:
             import ray
 
             ray.shutdown()
