@@ -1,0 +1,90 @@
+<svg width="100%" viewBox="0 0 680 520" xmlns="http://www.w3.org/2000/svg">
+<style>
+  text { font-family: system-ui, -apple-system, sans-serif; }
+  .th { font-size: 14px; font-weight: 500; fill: #3d3d3a; }
+  .ts { font-size: 12px; fill: #73726c; }
+  .arr { stroke: #73726c; stroke-width: 1.5; }
+  .box-blue { fill: #E6F1FB; stroke: #185FA5; stroke-width: 0.5; }
+  .box-teal { fill: #E1F5EE; stroke: #0F6E56; stroke-width: 0.5; }
+  .box-purple { fill: #EEEDFE; stroke: #534AB7; stroke-width: 0.5; }
+  .box-coral { fill: #FAECE7; stroke: #993C1D; stroke-width: 0.5; }
+  .box-gray { fill: #F1EFE8; stroke: #5F5E5A; stroke-width: 0.5; }
+  .t-blue { fill: #0C447C; }
+  .t-teal { fill: #085041; }
+  .t-purple { fill: #3C3489; }
+  .t-coral { fill: #712B13; }
+  .t-gray { fill: #444441; }
+  .ts-blue { fill: #185FA5; }
+  .ts-teal { fill: #0F6E56; }
+  .ts-purple { fill: #534AB7; }
+  .ts-coral { fill: #993C1D; }
+  .ts-gray { fill: #5F5E5A; }
+  @media (prefers-color-scheme: dark) {
+    .th { fill: #e0e0e0; }
+    .ts { fill: #9c9a92; }
+    .arr { stroke: #9c9a92; }
+    .box-blue { fill: #0C447C; stroke: #85B7EB; }
+    .box-teal { fill: #085041; stroke: #5DCAA5; }
+    .box-purple { fill: #3C3489; stroke: #AFA9EC; }
+    .box-coral { fill: #712B13; stroke: #F0997B; }
+    .box-gray { fill: #444441; stroke: #B4B2A9; }
+    .t-blue, .ts-blue { fill: #B5D4F4; }
+    .t-teal, .ts-teal { fill: #9FE1CB; }
+    .t-purple, .ts-purple { fill: #CECBF6; }
+    .t-coral, .ts-coral { fill: #F5C4B3; }
+    .t-gray, .ts-gray { fill: #D3D1C7; }
+  }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+
+<rect class="box-blue" x="40" y="30" width="600" height="80" rx="12"/>
+<text class="th t-blue" x="340" y="55" text-anchor="middle">Browser</text>
+<text class="ts ts-blue" x="340" y="75" text-anchor="middle">Canvas rendering, zoom/pan, colormap lookup, WebSocket client</text>
+
+<text class="ts" x="340" y="135" text-anchor="middle">WebSocket (binary frames + JSON control)</text>
+<line x1="340" y1="110" x2="340" y2="155" class="arr" marker-end="url(#arrow)"/>
+
+<rect class="box-teal" x="180" y="160" width="320" height="56" rx="8"/>
+<text class="th t-teal" x="340" y="182" text-anchor="middle" dominant-baseline="central">FastAPI web server</text>
+<text class="ts ts-teal" x="340" y="200" text-anchor="middle" dominant-baseline="central">Bridges UI and engine</text>
+
+<text class="ts" x="340" y="240" text-anchor="middle">Direct method calls</text>
+<line x1="340" y1="216" x2="340" y2="260" class="arr" marker-end="url(#arrow)"/>
+
+<rect class="box-purple" x="130" y="265" width="420" height="56" rx="8"/>
+<text class="th t-purple" x="340" y="287" text-anchor="middle" dominant-baseline="central">Coordinator</text>
+<text class="ts ts-purple" x="340" y="305" text-anchor="middle" dominant-baseline="central">Step loop, halo exchange, repartitioning, metrics</text>
+
+<text class="ts" x="340" y="345" text-anchor="middle">WorkerPool interface</text>
+<line x1="340" y1="321" x2="340" y2="365" class="arr" marker-end="url(#arrow)"/>
+
+<rect class="box-gray" x="40" y="370" width="600" height="130" rx="16" stroke-dasharray="4 3"/>
+<text class="th t-gray" x="340" y="396" text-anchor="middle">Worker pool (local or Ray)</text>
+
+<rect class="box-coral" x="65" y="415" width="120" height="56" rx="8"/>
+<text class="th t-coral" x="125" y="437" text-anchor="middle" dominant-baseline="central">Worker 0</text>
+<text class="ts ts-coral" x="125" y="455" text-anchor="middle" dominant-baseline="central">rows 0..127</text>
+
+<rect class="box-coral" x="210" y="415" width="120" height="56" rx="8"/>
+<text class="th t-coral" x="270" y="437" text-anchor="middle" dominant-baseline="central">Worker 1</text>
+<text class="ts ts-coral" x="270" y="455" text-anchor="middle" dominant-baseline="central">rows 128..255</text>
+
+<rect class="box-coral" x="355" y="415" width="120" height="56" rx="8"/>
+<text class="th t-coral" x="415" y="437" text-anchor="middle" dominant-baseline="central">Worker 2</text>
+<text class="ts ts-coral" x="415" y="455" text-anchor="middle" dominant-baseline="central">rows 256..383</text>
+
+<rect class="box-coral" x="500" y="415" width="120" height="56" rx="8"/>
+<text class="th t-coral" x="560" y="437" text-anchor="middle" dominant-baseline="central">Worker 3</text>
+<text class="ts ts-coral" x="560" y="455" text-anchor="middle" dominant-baseline="central">rows 384..511</text>
+
+<line x1="185" y1="443" x2="208" y2="443" stroke="#D85A30" stroke-width="1" marker-end="url(#arrow)"/>
+<line x1="208" y1="447" x2="185" y2="447" stroke="#D85A30" stroke-width="1" marker-end="url(#arrow)"/>
+<line x1="330" y1="443" x2="353" y2="443" stroke="#D85A30" stroke-width="1" marker-end="url(#arrow)"/>
+<line x1="353" y1="447" x2="330" y2="447" stroke="#D85A30" stroke-width="1" marker-end="url(#arrow)"/>
+<line x1="475" y1="443" x2="498" y2="443" stroke="#D85A30" stroke-width="1" marker-end="url(#arrow)"/>
+<line x1="498" y1="447" x2="475" y2="447" stroke="#D85A30" stroke-width="1" marker-end="url(#arrow)"/>
+</svg>
