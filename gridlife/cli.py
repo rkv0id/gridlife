@@ -94,8 +94,10 @@ def list_sims() -> None:
     """List available simulations."""
     from gridlife.simulations.game_of_life import GameOfLife
     from gridlife.simulations.gray_scott import GrayScott
+    from gridlife.simulations.lenia import Lenia
+    from gridlife.simulations.smoothlife import SmoothLife
 
-    for sim_cls in [GameOfLife, GrayScott]:
+    for sim_cls in [GameOfLife, GrayScott, Lenia, SmoothLife]:
         s = sim_cls()
         params_str = ", ".join(s.params.keys()) if s.params else "none"
         typer.echo(f"  {s.name:20s} {s.description}")

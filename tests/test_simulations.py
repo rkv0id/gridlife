@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from gridlife.simulations.base import Simulation
 from gridlife.simulations.game_of_life import GameOfLife
 from gridlife.simulations.gray_scott import GrayScott
+from gridlife.simulations.lenia import Lenia
+from gridlife.simulations.smoothlife import SmoothLife
 
 
 def pad_and_step(
@@ -125,6 +127,50 @@ class TestGrayScott:
         for preset_name, preset_vals in self.sim.presets.items():
             for k in preset_vals:
                 assert k in valid_keys, f"Preset '{preset_name}' has invalid key '{k}'"
+
+    def test_palette_shape(self) -> None:
+        pal = self.sim.palette()
+        assert pal.shape == (256, 3)
+        assert pal.dtype == torch.uint8
+
+
+class TestLenia:
+    def setup_method(self) -> None:
+        self.sim = Lenia()
+
+    def test_step_preserves_shape(self) -> None:
+        grid = self.sim.init_grid(64, 64, torch.device("cpu"))
+        result = pad_and_step(self.sim, grid)
+        assert result.shape == grid.shape
+
+    def test_step_values_bounded(self) -> None:
+        grid = self.sim.init_grid(64, 64, torch.device("cpu"))
+        for _ in range(20):
+            grid = pad_and_step(self.sim, grid)
+        assert grid.min() >= 0.0
+        assert grid.max() <= 1.0
+
+    def test_palette_shape(self) -> None:
+        pal = self.sim.palette()
+        assert pal.shape == (256, 3)
+        assert pal.dtype == torch.uint8
+
+
+class TestSmoothLife:
+    def setup_method(self) -> None:
+        self.sim = SmoothLife()
+
+    def test_step_preserves_shape(self) -> None:
+        grid = self.sim.init_grid(64, 64, torch.device("cpu"))
+        result = pad_and_step(self.sim, grid)
+        assert result.shape == grid.shape
+
+    def test_step_values_bounded(self) -> None:
+        grid = self.sim.init_grid(64, 64, torch.device("cpu"))
+        for _ in range(20):
+            grid = pad_and_step(self.sim, grid)
+        assert grid.min() >= 0.0
+        assert grid.max() <= 1.0
 
     def test_palette_shape(self) -> None:
         pal = self.sim.palette()

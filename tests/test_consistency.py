@@ -5,6 +5,8 @@ from gridlife.engine.partition import merge_strips, split_grid
 from gridlife.simulations.base import Simulation
 from gridlife.simulations.game_of_life import GameOfLife
 from gridlife.simulations.gray_scott import GrayScott
+from gridlife.simulations.lenia import Lenia
+from gridlife.simulations.smoothlife import SmoothLife
 
 
 def run_single(sim: Simulation, grid: torch.Tensor, steps: int) -> torch.Tensor:
@@ -101,3 +103,12 @@ class TestMultiWorkerConsistency:
     def test_single_row_strips(self) -> None:
         """Edge case: each worker gets 1-2 rows."""
         self._check_consistency(GameOfLife(), 8, 16, 20, [4, 8])
+
+    def test_lenia_even_split(self) -> None:
+        sim = Lenia()
+        # Lenia has halo_size=13, needs height > 2*13 per worker
+        self._check_consistency(sim, 64, 64, 10, [2])
+
+    def test_smoothlife_even_split(self) -> None:
+        sim = SmoothLife()
+        self._check_consistency(sim, 64, 64, 10, [2])

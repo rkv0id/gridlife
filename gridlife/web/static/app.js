@@ -85,25 +85,19 @@ function drawFrame() {
 
     if (!imageData) return;
 
-    // Temp canvas to hold ImageData for drawImage scaling
     const tmp = document.createElement("canvas");
     tmp.width = gridWidth;
     tmp.height = gridHeight;
     tmp.getContext("2d").putImageData(imageData, 0, 0);
 
-    // Fit to canvas with margin
     const scaleX = canvas.width / gridWidth;
     const scaleY = canvas.height / gridHeight;
     const fitScale = Math.min(scaleX, scaleY) * 0.95;
 
     ctx.save();
 
-    if (simInfo && simInfo.pixelated) {
-        ctx.imageSmoothingEnabled = false;
-    } else {
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = "high";
-    }
+    // Nearest-neighbor for crisp cell rendering at any zoom
+    ctx.imageSmoothingEnabled = false;
 
     ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
     ctx.scale(zoom * fitScale, zoom * fitScale);
@@ -140,7 +134,6 @@ function updateStatusInfo() {
 }
 
 function updateSimUI(info) {
-    // Build param sliders
     const container = document.getElementById("params-container");
     container.innerHTML = "";
     for (const [key, param] of Object.entries(info.params || {})) {
@@ -168,7 +161,6 @@ function updateSimUI(info) {
         container.appendChild(row);
     }
 
-    // Build presets
     const presetsSection = document.getElementById("presets-section");
     const presetSelect = document.getElementById("preset-select");
     if (info.presets && Object.keys(info.presets).length > 0) {
@@ -184,7 +176,6 @@ function updateSimUI(info) {
         presetsSection.style.display = "none";
     }
 
-    // Set sim selector to current sim
     const simSelect = document.getElementById("sim-select");
     for (const opt of simSelect.options) {
         if (opt.value === info.name) {
@@ -199,7 +190,6 @@ function updateMetrics(data) {
     document.getElementById("m-halo").textContent = (data.halo_ms || 0).toFixed(1);
     document.getElementById("m-steps").textContent = data.step_count || 0;
 
-    // Update worker slider to reflect actual count
     if (data.num_workers) {
         document.getElementById("worker-slider").value = data.num_workers;
         document.getElementById("worker-count").textContent = data.num_workers;
@@ -266,7 +256,6 @@ fetch("/api/simulations").then(r => r.json()).then((sims) => {
         opt.textContent = sim.description || sim.name;
         select.appendChild(opt);
     }
-    // Set initial selection from sim_info if available
     if (simInfo) {
         select.value = simInfo.name;
     }
@@ -305,12 +294,26 @@ workerSlider.addEventListener("input", () => {
     workerCount.textContent = workerSlider.value;
 });
 
-// Zoom with scroll wheel
+// Zoom with scroll wheel, centered on mouse position
 canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Mouse position relative to canvas center + pan offset
+    const dx = mouseX - canvas.width / 2 - panX;
+    const dy = mouseY - canvas.height / 2 - panY;
+
     const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    zoom *= zoomFactor;
-    zoom = Math.max(0.1, Math.min(50, zoom));
+    const newZoom = Math.max(0.1, Math.min(50, zoom * zoomFactor));
+
+    // Adjust pan so the point under the mouse stays fixed
+    panX -= dx * (newZoom / zoom - 1);
+    panY -= dy * (newZoom / zoom - 1);
+
+    zoom = newZoom;
     drawFrame();
 }, { passive: false });
 

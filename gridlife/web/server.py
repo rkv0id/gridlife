@@ -12,6 +12,8 @@ from gridlife.engine.coordinator import Coordinator
 from gridlife.simulations.base import Simulation
 from gridlife.simulations.game_of_life import GameOfLife
 from gridlife.simulations.gray_scott import GrayScott
+from gridlife.simulations.lenia import Lenia
+from gridlife.simulations.smoothlife import SmoothLife
 from gridlife.viz.encoder import encode_frame_message, encode_palette_message
 
 logger = logging.getLogger("gridlife.web")
@@ -21,6 +23,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 SIMULATIONS: dict[str, type[Simulation]] = {
     "game_of_life": GameOfLife,
     "gray_scott": GrayScott,
+    "lenia": Lenia,
+    "smoothlife": SmoothLife,
 }
 
 
