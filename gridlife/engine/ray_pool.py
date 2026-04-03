@@ -121,3 +121,55 @@ class RayWorkerPool(WorkerPool):
         for w in self.workers:
             ray.kill(w)
         self.workers.clear()
+
+    def kill_worker(self, worker_id: int | None = None) -> int | None:
+        if len(self.workers) <= 1:
+            return None
+
+        import random
+
+        if worker_id is None:
+            worker_id = random.randint(0, len(self.workers) - 1)
+
+        if worker_id < 0 or worker_id >= len(self.workers):
+            return None
+
+        # Collect all strips, zero-fill the dead one
+        strips = []
+        for i, w in enumerate(self.workers):
+            if i == worker_id:
+                h: torch.Tensor = ray.get(w.get_strip_data.remote())
+                strips.append(torch.zeros_like(h))
+                ray.kill(w)
+            else:
+                strips.append(ray.get(w.get_strip_data.remote()))
+
+        grid = merge_strips(strips)
+
+        # Clear remaining workers
+        for i, w in enumerate(self.workers):
+            if i != worker_id:
+                ray.kill(w)
+        self.workers.clear()
+
+        # Repartition to N-1
+        new_count = len(strips) - 1
+        self.num_workers = new_count
+        self.row_ranges = compute_row_ranges(self.height, new_count)
+        new_strips = split_grid(grid, new_count)
+
+        for i, (strip, (row_start, _)) in enumerate(zip(new_strips, self.row_ranges, strict=True)):
+            if self.gpu:
+                worker = StripWorker.options(num_gpus=1).remote(
+                    i, self.simulation, strip, row_start
+                )
+            else:
+                worker = StripWorker.options(num_cpus=1).remote(
+                    i, self.simulation, strip, row_start
+                )
+            self.workers.append(worker)
+
+        return worker_id
+
+    def heal_worker(self) -> None:
+        self.repartition(len(self.workers) + 1)

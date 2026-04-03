@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import time
 from typing import TYPE_CHECKING
 
@@ -81,8 +82,9 @@ class LocalWorker:
         return indices.cpu().numpy().tobytes()
 
     def get_strip_data(self) -> torch.Tensor:
+        """Return owned grid data. Always on CPU for cross-device compatibility."""
         h = self.halo_size
-        return self.grid[:, h : h + self.owned_height, :]
+        return self.grid[:, h : h + self.owned_height, :].cpu()
 
     def set_strip_data(self, data: torch.Tensor, row_offset: int) -> None:
         h = self.halo_size
@@ -153,6 +155,12 @@ class WorkerPool:
     def shutdown(self) -> None:
         raise NotImplementedError
 
+    def kill_worker(self, worker_id: int | None = None) -> int | None:
+        raise NotImplementedError
+
+    def heal_worker(self) -> None:
+        raise NotImplementedError
+
 
 class LocalWorkerPool(WorkerPool):
     """
@@ -187,7 +195,6 @@ class LocalWorkerPool(WorkerPool):
     def do_step(self) -> None:
         n = len(self.workers)
 
-        # Halo exchange first
         t0 = time.perf_counter()
         tops = [w.get_top_boundary() for w in self.workers]
         bots = [w.get_bottom_boundary() for w in self.workers]
@@ -198,7 +205,6 @@ class LocalWorkerPool(WorkerPool):
             self.workers[i].set_bottom_halo(tops[below])
         self.halo_ms = (time.perf_counter() - t0) * 1000
 
-        # Then step all workers
         t0 = time.perf_counter()
         for w in self.workers:
             w.step()
@@ -233,3 +239,43 @@ class LocalWorkerPool(WorkerPool):
 
     def shutdown(self) -> None:
         self.workers.clear()
+
+    def kill_worker(self, worker_id: int | None = None) -> int | None:
+        """
+        Kill a worker and redistribute its rows across survivors.
+        The dead worker's data is lost - zero-filled in the reassembled grid.
+        Returns the killed worker's ID.
+        """
+        if len(self.workers) <= 1:
+            return None
+
+        if worker_id is None:
+            worker_id = random.randint(0, len(self.workers) - 1)
+
+        if worker_id < 0 or worker_id >= len(self.workers):
+            return None
+
+        surviving_strips = []
+        for i, w in enumerate(self.workers):
+            if i == worker_id:
+                lost_strip = torch.zeros(w.grid.shape[0], w.owned_height, self.width)
+                surviving_strips.append(lost_strip)
+            else:
+                surviving_strips.append(w.get_strip_data())
+
+        grid = merge_strips(surviving_strips)
+
+        new_count = len(self.workers) - 1
+        self.num_workers = new_count
+        self.row_ranges = compute_row_ranges(self.height, new_count)
+        strips = split_grid(grid, new_count)
+
+        self.workers = []
+        for i, (strip, (row_start, _)) in enumerate(zip(strips, self.row_ranges, strict=True)):
+            self.workers.append(LocalWorker(i, self.simulation, strip, row_start))
+
+        return worker_id
+
+    def heal_worker(self) -> None:
+        """Add one worker back by repartitioning from N to N+1."""
+        self.repartition(len(self.workers) + 1)

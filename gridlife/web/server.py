@@ -59,6 +59,7 @@ class SimulationServer:
         self.simulation: Simulation | None = None
         self.running = False
         self.clients: list[WebSocket] = []
+        self._chaos_task: asyncio.Task | None = None  # type: ignore[type-arg]
 
         self._init_simulation(sim_name)
 
@@ -207,6 +208,35 @@ class SimulationServer:
         except Exception as e:
             logger.error(f"Frame send error: {e}")
 
+    async def _chaos_loop(self) -> None:
+        """Randomly kill a worker every 10s, heal after 5s."""
+        while True:
+            await asyncio.sleep(10)
+            if self.coordinator and self.coordinator.num_workers > 1:
+                killed = self.coordinator.kill_worker()
+                if killed is not None:
+                    await self._broadcast_json(
+                        {
+                            "type": "worker_killed",
+                            "data": {
+                                "worker_id": killed,
+                                "num_workers": self.coordinator.num_workers,
+                            },
+                        }
+                    )
+                    await self._send_frame()
+
+            await asyncio.sleep(5)
+            if self.coordinator:
+                self.coordinator.heal_worker()
+                await self._broadcast_json(
+                    {
+                        "type": "worker_healed",
+                        "data": {"num_workers": self.coordinator.num_workers},
+                    }
+                )
+                await self._send_frame()
+
     async def handle_message(self, msg: dict[str, Any]) -> None:
         msg_type = msg.get("type")
 
@@ -261,6 +291,38 @@ class SimulationServer:
             value = msg.get("value", 1.0)
             radius = msg.get("radius", 3)
             self.coordinator.perturb(row, col, channel, value, radius)
+
+        elif msg_type == "kill_worker" and self.coordinator is not None:
+            worker_id = msg.get("worker_id")
+            killed = self.coordinator.kill_worker(worker_id)
+            if killed is not None:
+                await self._broadcast_json(
+                    {
+                        "type": "worker_killed",
+                        "data": {"worker_id": killed, "num_workers": self.coordinator.num_workers},
+                    }
+                )
+                await self._send_frame()
+
+        elif msg_type == "heal_worker" and self.coordinator is not None:
+            self.coordinator.heal_worker()
+            await self._broadcast_json(
+                {
+                    "type": "worker_healed",
+                    "data": {"num_workers": self.coordinator.num_workers},
+                }
+            )
+            await self._send_frame()
+
+        elif msg_type == "chaos":
+            enabled = msg.get("enabled", False)
+            if enabled and self._chaos_task is None:
+                self._chaos_task = asyncio.create_task(self._chaos_loop())
+                await self._broadcast_json({"type": "chaos_status", "data": {"enabled": True}})
+            elif not enabled and self._chaos_task is not None:
+                self._chaos_task.cancel()
+                self._chaos_task = None
+                await self._broadcast_json({"type": "chaos_status", "data": {"enabled": False}})
 
     def sim_info(self) -> dict[str, Any]:
         if self.simulation is None:

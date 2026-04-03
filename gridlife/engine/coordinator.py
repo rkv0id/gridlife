@@ -61,6 +61,18 @@ class Coordinator:
     def perturb(self, row: int, col: int, channel: int, value: float, radius: int) -> None:
         self.pool.perturb(row, col, channel, value, radius)
 
+    def kill_worker(self, worker_id: int | None = None) -> int | None:
+        """Kill a worker. Returns the killed worker's ID."""
+        result = self.pool.kill_worker(worker_id)
+        if result is not None:
+            self.num_workers = self.pool.num_workers
+        return result
+
+    def heal_worker(self) -> None:
+        """Add one worker back."""
+        self.pool.heal_worker()
+        self.num_workers = self.pool.num_workers
+
     def shutdown(self) -> None:
         self.pool.shutdown()
 

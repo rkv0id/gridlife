@@ -45,6 +45,8 @@ ignore = ["tests/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["ray: tests requiring Ray (deselected by default)"]
+addopts = "-m 'not ray'"
 
 [tool.uv]
 dev-dependencies = [

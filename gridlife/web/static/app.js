@@ -124,6 +124,16 @@ function handleMessage(msg) {
             document.getElementById("btn-play").disabled = true;
             document.getElementById("btn-pause").disabled = false;
         }
+    } else if (msg.type === "worker_killed") {
+        document.getElementById("status-bar").textContent =
+            `Worker ${msg.data.worker_id} killed (${msg.data.num_workers} remaining)`;
+    } else if (msg.type === "worker_healed") {
+        document.getElementById("status-bar").textContent =
+            `Worker healed (${msg.data.num_workers} workers)`;
+    } else if (msg.type === "chaos_status") {
+        chaosEnabled = msg.data.enabled;
+        document.getElementById("btn-chaos").textContent =
+            `Auto-Chaos: ${chaosEnabled ? "ON" : "OFF"}`;
     }
 }
 
@@ -356,5 +366,22 @@ canvas.addEventListener("mouseleave", () => {
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 window.addEventListener("resize", drawFrame);
+
+// Kill/Heal/Chaos
+document.getElementById("btn-kill").addEventListener("click", () => {
+    send({ type: "kill_worker" });
+});
+
+document.getElementById("btn-heal").addEventListener("click", () => {
+    send({ type: "heal_worker" });
+});
+
+let chaosEnabled = false;
+document.getElementById("btn-chaos").addEventListener("click", () => {
+    chaosEnabled = !chaosEnabled;
+    send({ type: "chaos", enabled: chaosEnabled });
+    document.getElementById("btn-chaos").textContent =
+        `Auto-Chaos: ${chaosEnabled ? "ON" : "OFF"}`;
+});
 
 connect();

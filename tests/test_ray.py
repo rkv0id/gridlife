@@ -8,6 +8,9 @@ from gridlife.simulations.base import Simulation
 from gridlife.simulations.game_of_life import GameOfLife
 from gridlife.simulations.gray_scott import GrayScott
 
+# Skip Ray tests by default - run with: pytest -m ray
+pytestmark = pytest.mark.ray
+
 
 @pytest.fixture(scope="module", autouse=True)
 def ray_init():

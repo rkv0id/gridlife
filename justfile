@@ -18,6 +18,10 @@ test *ARGS:
 testv *ARGS:
     uv run pytest -v {{ARGS}}
 
+# Run Ray integration tests (must use .venv/bin to avoid uv run hang)
+test-ray:
+    .venv/bin/pytest -m ray -v
+
 fmt:
     uv run ruff format .
     uv run ruff check --fix .
