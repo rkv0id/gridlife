@@ -35,9 +35,12 @@ def run_local_baseline(
 def run_distributed(
     sim: Simulation, height: int, width: int, steps: int, num_workers: int, seed: int
 ) -> torch.Tensor:
+    from gridlife.engine.ray_pool import RayWorkerPool
+
     torch.manual_seed(seed)
     grid = sim.init_grid(height, width, torch.device("cpu"))
-    coord = Coordinator(sim, width, height, num_workers, gpu=False, init_grid=grid)
+    pool = RayWorkerPool(sim, width, height, num_workers)
+    coord = Coordinator(sim, width, height, num_workers, pool=pool, init_grid=grid)
     coord.run_steps(steps)
     result = coord.collect_grid()
     coord.shutdown()
@@ -86,10 +89,13 @@ class TestRepartitioning:
     def test_repartition_preserves_state(self) -> None:
         """Collecting grid, redistributing to more workers, and collecting again
         should return the exact same grid."""
+        from gridlife.engine.ray_pool import RayWorkerPool
+
         sim = GameOfLife()
         torch.manual_seed(42)
         grid = sim.init_grid(64, 64, torch.device("cpu"))
-        coord = Coordinator(sim, 64, 64, 2, gpu=False, init_grid=grid)
+        pool = RayWorkerPool(sim, 64, 64, 2)
+        coord = Coordinator(sim, 64, 64, 2, pool=pool, init_grid=grid)
 
         coord.run_steps(20)
         grid_before = coord.collect_grid()
@@ -104,11 +110,14 @@ class TestRepartitioning:
         """Run 20 steps with 2 workers, repartition to 4, run 20 more.
         Can't compare to uninterrupted run because repartitioning changes
         halo exchange topology. Verify grid is structurally valid instead."""
+        from gridlife.engine.ray_pool import RayWorkerPool
+
         sim = GameOfLife()
         torch.manual_seed(42)
         grid = sim.init_grid(64, 64, torch.device("cpu"))
 
-        coord = Coordinator(sim, 64, 64, 2, gpu=False, init_grid=grid)
+        pool = RayWorkerPool(sim, 64, 64, 2)
+        coord = Coordinator(sim, 64, 64, 2, pool=pool, init_grid=grid)
         coord.run_steps(20)
         coord.repartition(4)
         coord.run_steps(20)

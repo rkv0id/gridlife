@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import ray
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,8 +29,7 @@ class SimulationServer:
     Bridges the browser UI and the distributed simulation engine.
 
     Owns the Coordinator, manages the step/render loop, handles
-    WebSocket clients, and routes control messages (play, pause,
-    parameter changes, repartitioning, perturbation).
+    WebSocket clients, and routes control messages.
     """
 
     def __init__(
@@ -40,20 +38,18 @@ class SimulationServer:
         width: int,
         height: int,
         num_workers: int,
-        gpu: bool,
         render_fps: int,
-        render_resolution: int,
         throttle: bool = True,
         steps_per_run: int = 500,
+        coordinator_factory: Any = None,
     ) -> None:
         self.width = width
         self.height = height
         self.num_workers = num_workers
-        self.gpu = gpu
         self.render_fps = render_fps
-        self.render_resolution = render_resolution
         self.throttle = throttle
         self.steps_per_run = steps_per_run
+        self.coordinator_factory = coordinator_factory
 
         self.coordinator: Coordinator | None = None
         self.simulation: Simulation | None = None
@@ -72,16 +68,17 @@ class SimulationServer:
             raise ValueError(f"Unknown simulation: {sim_name}")
 
         self.simulation = sim_cls()
-        self.coordinator = Coordinator(
-            self.simulation,
-            self.width,
-            self.height,
-            self.num_workers,
-            gpu=self.gpu,
-        )
+        if self.coordinator_factory:
+            self.coordinator = self.coordinator_factory(self.simulation)
+        else:
+            self.coordinator = Coordinator(
+                self.simulation,
+                self.width,
+                self.height,
+                self.num_workers,
+            )
 
     def _get_palette_bytes(self) -> bytes:
-        """Get the current simulation's palette as raw bytes (256 * 3 = 768 bytes)."""
         if self.simulation is None:
             return b"\x00" * 768
         return self.simulation.palette().numpy().tobytes()
@@ -91,22 +88,18 @@ class SimulationServer:
         Gather rendered uint8 strips from all workers, concatenate,
         and wrap in a binary frame message.
         """
-        if self.coordinator is None or self.simulation is None:
+        if self.coordinator is None:
             return b""
 
-        strips_bytes = ray.get([w.render.remote() for w in self.coordinator.workers])
-
-        raw = b""
-        for strip_b in strips_bytes:
-            raw += strip_b
-
+        strips = self.coordinator.collect_frame()
+        raw = b"".join(strips)
         return encode_frame_message(raw, self.width, self.height)
 
     async def step_loop(self) -> None:
         """
-        Runs simulation steps in a background thread to avoid blocking
-        the asyncio event loop. Stops after steps_per_run steps (if set)
-        or when paused. User clicks Play again to run another batch.
+        Runs simulation steps. In local mode this is fast enough to
+        run directly in the event loop. Uses run_in_executor as a
+        safety net so the event loop stays responsive for control messages.
         """
         import concurrent.futures
 
@@ -119,7 +112,6 @@ class SimulationServer:
         unlimited = self.steps_per_run == 0
 
         def run_batch() -> int:
-            """Blocking work that runs in the thread pool."""
             if self.coordinator is None:
                 return 0
             count = 0
@@ -143,7 +135,6 @@ class SimulationServer:
             if not self.running:
                 break
 
-            # Check step limit
             if not unlimited and steps_done >= self.steps_per_run:
                 self.running = False
                 await self._broadcast_json(
@@ -154,7 +145,7 @@ class SimulationServer:
                 )
 
             try:
-                frame = await loop.run_in_executor(executor, self.collect_frame)
+                frame = self.collect_frame()
                 await self._broadcast_binary(frame)
                 metrics = self.coordinator.get_metrics()
                 await self._broadcast_json({"type": "metrics", "data": metrics})
@@ -174,7 +165,6 @@ class SimulationServer:
         executor.shutdown(wait=False)
 
     async def _broadcast_binary(self, data: bytes) -> None:
-        """Send binary data to all WebSocket clients, removing any that have disconnected."""
         disconnected = []
         for ws in self.clients:
             try:
@@ -185,7 +175,6 @@ class SimulationServer:
             self.clients.remove(ws)
 
     async def _broadcast_json(self, data: dict[str, Any]) -> None:
-        """Send JSON data to all WebSocket clients, removing any that have disconnected."""
         disconnected = []
         for ws in self.clients:
             try:
@@ -204,7 +193,7 @@ class SimulationServer:
             await self._broadcast_binary(msg)
 
     async def _send_frame(self) -> None:
-        """Render and broadcast a single frame. Used after reset, sim switch, repartition."""
+        """Render and broadcast a single frame."""
         try:
             frame = self.collect_frame()
             await self._broadcast_binary(frame)
@@ -215,11 +204,6 @@ class SimulationServer:
             logger.error(f"Frame send error: {e}")
 
     async def handle_message(self, msg: dict[str, Any]) -> None:
-        """
-        Route an incoming WebSocket control message to the appropriate handler.
-        Messages are JSON with a "type" field. Supported types:
-        play, pause, set_params, set_workers, switch_sim, reset, perturb.
-        """
         msg_type = msg.get("type")
 
         if msg_type == "play":
@@ -272,18 +256,9 @@ class SimulationServer:
             channel = msg.get("channel", 0)
             value = msg.get("value", 1.0)
             radius = msg.get("radius", 3)
-            for i, (start, end) in enumerate(self.coordinator.row_ranges):
-                if start <= row < end:
-                    local_row = row - start
-                    ray.get(
-                        self.coordinator.workers[i].perturb.remote(
-                            local_row, col, channel, value, radius
-                        )
-                    )
-                    break
+            self.coordinator.perturb(row, col, channel, value, radius)
 
     def sim_info(self) -> dict[str, Any]:
-        """Serialize current simulation metadata for the browser client."""
         if self.simulation is None:
             return {}
         return {
@@ -307,7 +282,6 @@ class SimulationServer:
         }
 
     def get_simulations_list(self) -> list[dict[str, Any]]:
-        """Return metadata for all registered simulations (for the sim selector dropdown)."""
         result = []
         for _name, cls in SIMULATIONS.items():
             sim = cls()
@@ -328,10 +302,6 @@ class SimulationServer:
 
 
 def create_app(server: SimulationServer) -> FastAPI:
-    """
-    Build the FastAPI application. Registers HTTP routes for static files
-    and API endpoints, plus the WebSocket endpoint for live streaming.
-    """
     app = FastAPI(title="gridlife")
 
     @app.get("/")
@@ -356,7 +326,6 @@ def create_app(server: SimulationServer) -> FastAPI:
         await ws.accept()
         server.clients.append(ws)
 
-        # Send simulation info, palette, and initial frame on connect
         await ws.send_text(
             json.dumps(
                 {

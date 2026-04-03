@@ -17,8 +17,8 @@ fmt:
     uv run ruff format .
     uv run ruff check --fix .
 
-lint:
-    uv run ruff check .
+lint *ARGS:
+    uv run ruff check . {{ARGS}}
 
 typecheck:
     uv run pyright gridlife/
