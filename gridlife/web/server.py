@@ -344,7 +344,6 @@ class SimulationServer:
                 for k, v in self.simulation.params.items()
             },
             "presets": self.simulation.presets,
-            "pixelated": self.simulation.pixelated,
         }
 
     def get_simulations_list(self) -> list[dict[str, Any]]:

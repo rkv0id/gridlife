@@ -23,7 +23,6 @@ class Simulation:
     halo_size: int = 1
     params: dict[str, Param] = {}
     presets: dict[str, dict[str, float]] = {}
-    pixelated: bool = False
 
     def step(self, grid: torch.Tensor, params: dict[str, float]) -> torch.Tensor:
         """

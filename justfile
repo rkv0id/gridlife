@@ -42,9 +42,6 @@ typecheck:
 
 check: fmt lint typecheck test
 
-demo *ARGS:
-    .venv/bin/python -m gridlife.demo {{ARGS}}
-
 # Generate demo outputs
 demo-png:
     .venv/bin/gridlife run --sim game_of_life --width 512 --height 512 --steps 100 --output gol.png

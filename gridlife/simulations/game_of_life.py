@@ -10,7 +10,6 @@ class GameOfLife(Simulation):
     channels = 1
     halo_size = 1
     params = {}
-    pixelated = True
 
     def __init__(self) -> None:
         # 3x3 kernel that counts all 8 neighbors (center = 0)
