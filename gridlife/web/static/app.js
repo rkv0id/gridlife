@@ -3,12 +3,11 @@ const ctx = canvas.getContext("2d");
 
 let ws = null;
 let simInfo = null;
-let palette = null; // Uint8Array of 768 bytes (256 * RGB)
+let palette = null;
 let gridWidth = 0;
 let gridHeight = 0;
-let imageData = null; // ImageData for current frame
+let imageData = null;
 
-// Zoom/pan state
 let zoom = 1;
 let panX = 0;
 let panY = 0;
@@ -44,10 +43,8 @@ function handleBinary(data) {
     const type = data[0];
 
     if (type === 0x01) {
-        // Palette: 1 byte type + 768 bytes RGB
         palette = data.slice(1);
     } else if (type === 0x02) {
-        // Frame: 1 byte type + 2 bytes width + 2 bytes height + pixel data
         const view = new DataView(data.buffer, data.byteOffset);
         const w = view.getUint16(1);
         const h = view.getUint16(3);
@@ -62,14 +59,11 @@ function renderGrid(w, h, pixels) {
     gridWidth = w;
     gridHeight = h;
 
-    // Create or reuse ImageData
     if (!imageData || imageData.width !== w || imageData.height !== h) {
         imageData = new ImageData(w, h);
     }
 
     const rgba = imageData.data;
-
-    // Apply palette lookup: each pixel byte -> RGB from palette
     for (let i = 0; i < pixels.length; i++) {
         const idx = pixels[i] * 3;
         const out = i * 4;
@@ -91,20 +85,19 @@ function drawFrame() {
 
     if (!imageData) return;
 
-    // Create a temporary canvas to hold the ImageData so we can drawImage with scaling
+    // Temp canvas to hold ImageData for drawImage scaling
     const tmp = document.createElement("canvas");
     tmp.width = gridWidth;
     tmp.height = gridHeight;
     tmp.getContext("2d").putImageData(imageData, 0, 0);
 
-    // Calculate fit scale to fill canvas with margin
+    // Fit to canvas with margin
     const scaleX = canvas.width / gridWidth;
     const scaleY = canvas.height / gridHeight;
     const fitScale = Math.min(scaleX, scaleY) * 0.95;
 
     ctx.save();
 
-    // Set interpolation mode based on simulation
     if (simInfo && simInfo.pixelated) {
         ctx.imageSmoothingEnabled = false;
     } else {
@@ -112,11 +105,8 @@ function drawFrame() {
         ctx.imageSmoothingQuality = "high";
     }
 
-    // Apply zoom and pan from canvas center
     ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
     ctx.scale(zoom * fitScale, zoom * fitScale);
-
-    // Draw centered
     ctx.drawImage(tmp, -gridWidth / 2, -gridHeight / 2);
 
     ctx.restore();
@@ -129,8 +119,7 @@ function handleMessage(msg) {
         zoom = 1;
         panX = 0;
         panY = 0;
-        document.getElementById("status-bar").textContent =
-            `${msg.data.name} | ${msg.data.width}x${msg.data.height}`;
+        updateStatusInfo();
     } else if (msg.type === "metrics") {
         updateMetrics(msg.data);
     } else if (msg.type === "status") {
@@ -144,7 +133,14 @@ function handleMessage(msg) {
     }
 }
 
+function updateStatusInfo() {
+    if (!simInfo) return;
+    document.getElementById("status-info").textContent =
+        `${simInfo.width}x${simInfo.height} | ${simInfo.name}`;
+}
+
 function updateSimUI(info) {
+    // Build param sliders
     const container = document.getElementById("params-container");
     container.innerHTML = "";
     for (const [key, param] of Object.entries(info.params || {})) {
@@ -172,6 +168,7 @@ function updateSimUI(info) {
         container.appendChild(row);
     }
 
+    // Build presets
     const presetsSection = document.getElementById("presets-section");
     const presetSelect = document.getElementById("preset-select");
     if (info.presets && Object.keys(info.presets).length > 0) {
@@ -186,12 +183,27 @@ function updateSimUI(info) {
     } else {
         presetsSection.style.display = "none";
     }
+
+    // Set sim selector to current sim
+    const simSelect = document.getElementById("sim-select");
+    for (const opt of simSelect.options) {
+        if (opt.value === info.name) {
+            simSelect.value = info.name;
+            break;
+        }
+    }
 }
 
 function updateMetrics(data) {
     document.getElementById("m-step").textContent = (data.step_ms || 0).toFixed(1);
     document.getElementById("m-halo").textContent = (data.halo_ms || 0).toFixed(1);
     document.getElementById("m-steps").textContent = data.step_count || 0;
+
+    // Update worker slider to reflect actual count
+    if (data.num_workers) {
+        document.getElementById("worker-slider").value = data.num_workers;
+        document.getElementById("worker-count").textContent = data.num_workers;
+    }
 }
 
 function send(msg) {
@@ -253,6 +265,10 @@ fetch("/api/simulations").then(r => r.json()).then((sims) => {
         opt.value = sim.name;
         opt.textContent = sim.description || sim.name;
         select.appendChild(opt);
+    }
+    // Set initial selection from sim_info if available
+    if (simInfo) {
+        select.value = simInfo.name;
     }
 });
 

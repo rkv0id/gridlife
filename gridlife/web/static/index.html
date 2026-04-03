@@ -36,8 +36,8 @@
                 <section>
                     <label>Workers</label>
                     <div class="worker-control">
-                        <input type="range" id="worker-slider" min="1" max="8" value="2">
-                        <span id="worker-count">2</span>
+                        <input type="range" id="worker-slider" min="1" max="16" value="4">
+                        <span id="worker-count">4</span>
                     </div>
                 </section>
                 <section>
@@ -51,7 +51,8 @@
             </aside>
         </div>
         <footer>
-            <span id="status-bar">disconnected</span>
+            <span class="status-left" id="status-bar">connecting...</span>
+            <span class="status-right" id="status-info"></span>
         </footer>
     </div>
     <script src="/static/app.js"></script>
