@@ -69,6 +69,8 @@ def serve(
     fastapi_app = create_app(server)
 
     def shutdown(sig: int, frame: object) -> None:
+        import os
+
         typer.echo("\nShutting down...")
         server.running = False
         if server.coordinator:
@@ -77,7 +79,7 @@ def serve(
             import ray
 
             ray.shutdown()
-        raise SystemExit(0)
+        os._exit(0)
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
