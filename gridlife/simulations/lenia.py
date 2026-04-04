@@ -62,9 +62,8 @@ class Lenia(Simulation):
 
         kernel = self._build_kernel(R, grid.device)
 
-        # grid: (1, H+2r, W+2r) with halos
-        # conv2d with kernel size (2r+1) and no padding strips the halos
-        potential = F.conv2d(grid, kernel)
+        # grid: (1, H+2r, W+2r) -> (N, C, H, W) for conv2d
+        potential = F.conv2d(grid.unsqueeze(0), kernel).squeeze(0)
 
         # Growth function: bell curve centered at mu with width sigma
         growth = 2.0 * torch.exp(-((potential - mu) ** 2) / (2.0 * sigma * sigma)) - 1.0

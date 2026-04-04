@@ -118,25 +118,19 @@ class SmoothLife(Simulation):
         r = int(ra)
         inner_k, outer_k = self._build_kernels(ra, grid.device)
 
-        # grid: (1, H+2r, W+2r) with halos
-        # conv2d with kernel size (2r+1) strips the halos
-        m = F.conv2d(grid, inner_k)  # inner neighborhood mean
-        n = F.conv2d(grid, outer_k)  # outer neighborhood mean
+        # grid: (1, H+2r, W+2r) -> (N, C, H, W) for conv2d
+        grid4d = grid.unsqueeze(0)
+        m = F.conv2d(grid4d, inner_k).squeeze(0)
+        n = F.conv2d(grid4d, outer_k).squeeze(0)
 
-        # Smooth transition function
-        # Birth: cell is dead (m low), comes alive if n in [b1, b2]
-        # Death: cell is alive (m high), stays alive if n in [d1, d2]
         alive = self._sigma(m, 0.5, alpha_m)
         birth = self._sigma_interval(n, b1, b2, alpha_n)
         death = self._sigma_interval(n, d1, d2, alpha_n)
 
-        # Interpolate between birth and death based on aliveness
         transition = birth * (1.0 - alive) + death * alive
 
-        # Extract inner region from input
         inner = grid[:, r : grid.shape[1] - r, r : grid.shape[2] - r]
 
-        # Update
         result = (inner + dt * (2.0 * transition - 1.0)).clamp(0, 1)
 
         return result

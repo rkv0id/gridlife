@@ -19,9 +19,8 @@ class GameOfLife(Simulation):
 
     def step(self, grid: torch.Tensor, params: dict[str, float]) -> torch.Tensor:
         kernel = self._kernel.to(grid.device)
-        # grid: (1, H+2, W+2) - has 1-cell halo on all sides
-        # conv2d with no padding strips the halo, giving (1, H, W)
-        neighbors = F.conv2d(grid, kernel)
+        # grid: (1, H+2, W+2) -> (N, C, H, W) for conv2d
+        neighbors = F.conv2d(grid.unsqueeze(0), kernel).squeeze(0)
         alive = grid[:, 1:-1, 1:-1]
         birth = (alive < 0.5) & (neighbors == 3)
         survive = (alive > 0.5) & ((neighbors == 2) | (neighbors == 3))

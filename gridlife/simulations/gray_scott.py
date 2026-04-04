@@ -43,14 +43,15 @@ class GrayScott(Simulation):
 
         lap_kernel = self._laplacian.to(grid.device)
 
-        u_padded = grid[0:1]  # (1, H+2, W+2)
-        v_padded = grid[1:2]
+        # grid: (2, H+2, W+2) - split channels, add batch dim for conv2d
+        u_padded = grid[0:1].unsqueeze(0)  # (1, 1, H+2, W+2)
+        v_padded = grid[1:2].unsqueeze(0)
 
-        lap_u = F.conv2d(u_padded, lap_kernel)  # (1, H, W)
-        lap_v = F.conv2d(v_padded, lap_kernel)
+        lap_u = F.conv2d(u_padded, lap_kernel).squeeze(0)  # (1, H, W)
+        lap_v = F.conv2d(v_padded, lap_kernel).squeeze(0)
 
-        u = u_padded[:, 1:-1, 1:-1]  # (1, H, W)
-        v = v_padded[:, 1:-1, 1:-1]
+        u = grid[0:1, 1:-1, 1:-1]  # (1, H, W)
+        v = grid[1:2, 1:-1, 1:-1]
 
         uvv = u * v * v
         du_dt = du * lap_u - uvv + f * (1.0 - u)
