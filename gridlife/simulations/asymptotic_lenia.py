@@ -2,16 +2,16 @@ import torch
 import torch.nn.functional as F
 
 from gridlife.simulations.base import Param, Simulation
-from gridlife.simulations.lenia import place_orbium
 
 
 class AsymptoticLenia(Simulation):
     """
     Asymptotic Lenia (Kawaguchi et al. 2021).
 
-    Update rule: A_t+dt = A_t + dt * (T(K*A) - A_t), where T(u) = (G(u) + 1) / 2.
-    Seeded with a Lenia Orbium; ALenia preserves the glider in a slightly
-    different basin than Lenia's clipped dynamics.
+    Update rule: A_t+dt = A_t + dt * (T(K*A) - A_t), where T(u) = (G(u)+1)/2.
+    Single-ring kernel with Orbium-neighborhood parameters sits in ALenia's
+    Turing-stripe basin, producing dense emergent wave patterns from random
+    initial conditions rather than isolated gliders.
     """
 
     name = "asymptotic_lenia"
@@ -26,25 +26,13 @@ class AsymptoticLenia(Simulation):
         "sigma": Param(default=0.015, min=0.001, max=0.1, step=0.001, description="Target width"),
     }
     presets = {
-        "orbium": {"R": 13.0, "dt": 0.1, "mu": 0.15, "sigma": 0.015, "_init": "orbium"},
-        "orbium_swarm": {
-            "R": 13.0,
-            "dt": 0.1,
-            "mu": 0.15,
-            "sigma": 0.015,
-            "_init": "orbium_swarm",
-        },
+        "turing": {"R": 13.0, "dt": 0.1, "mu": 0.15, "sigma": 0.015},
+        "stripes": {"R": 13.0, "dt": 0.1, "mu": 0.16, "sigma": 0.017},
     }
 
     def __init__(self) -> None:
         self._kernel: torch.Tensor | None = None
         self._kernel_r: float = 0.0
-        self._init_mode: str = "orbium"
-
-    def apply_preset_metadata(self, preset: dict[str, float | str]) -> None:
-        init_mode = preset.get("_init")
-        if isinstance(init_mode, str):
-            self._init_mode = init_mode
 
     def _build_kernel(self, R: float, device: torch.device) -> torch.Tensor:
         if self._kernel is not None and self._kernel_r == R and self._kernel.device == device:
@@ -91,18 +79,14 @@ class AsymptoticLenia(Simulation):
     def init_grid(self, height: int, width: int, device: torch.device) -> torch.Tensor:
         grid = torch.zeros(1, height, width, device=device)
 
-        if self._init_mode == "orbium":
-            place_orbium(grid, height // 2, width // 2, device)
-        elif self._init_mode == "orbium_swarm":
-            positions = [
-                (height // 3, width // 3),
-                (height // 3, 2 * width // 3),
-                (2 * height // 3, width // 3),
-                (2 * height // 3, 2 * width // 3),
-                (height // 2, width // 2),
-            ]
-            for cy, cx in positions:
-                place_orbium(grid, cy, cx, device)
+        n_patches = max(3, (height * width) // 10000)
+        for _ in range(n_patches):
+            cy = int(torch.randint(height // 4, 3 * height // 4, (1,)).item())
+            cx = int(torch.randint(width // 4, 3 * width // 4, (1,)).item())
+            patch_r = 20
+            y0, y1 = max(0, cy - patch_r), min(height, cy + patch_r)
+            x0, x1 = max(0, cx - patch_r), min(width, cx + patch_r)
+            grid[0, y0:y1, x0:x1] = torch.rand(y1 - y0, x1 - x0, device=device)
 
         return grid
 

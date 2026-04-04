@@ -14,7 +14,7 @@ class SmoothLife(Simulation):
     Two rule families. "discrete" uses direct replacement A' = s(n, m) per
     the original paper. "euler" uses smooth time stepping
     A' = A + dt * (s(n, m) - A), required for the SmoothLifeL ruleset that
-    produces the famous smooth glider.
+    produces the dense wicks-and-wires regime.
     """
 
     name = "smoothlife"
@@ -36,7 +36,7 @@ class SmoothLife(Simulation):
         ),
     }
     presets = {
-        # Rafler paper classic values, discrete time stepping.
+        # Rafler paper classic values, discrete time stepping. Stable blobs.
         "stable": {
             "ra": 12.0,
             "b1": 0.278,
@@ -47,8 +47,9 @@ class SmoothLife(Simulation):
             "alpha_m": 0.147,
             "_mode": "discrete",
         },
-        # SmoothLifeL with Euler integration. Produces the smooth glider.
-        "smooth_glider": {
+        # SmoothLifeL with Euler integration. Dense wicks-and-wires regime.
+        # Individual gliders occasionally emerge within but are not isolated.
+        "wicks": {
             "ra": 12.0,
             "b1": 0.257,
             "b2": 0.336,

@@ -97,7 +97,13 @@ class Lenia(Simulation):
     }
     presets = {
         "orbium": {"R": 13.0, "T": 10.0, "mu": 0.15, "sigma": 0.014, "_init": "orbium"},
-        "orbium_swarm": {"R": 13.0, "T": 10.0, "mu": 0.15, "sigma": 0.014, "_init": "orbium_swarm"},
+        "orbium_pair": {
+            "R": 13.0,
+            "T": 10.0,
+            "mu": 0.15,
+            "sigma": 0.014,
+            "_init": "orbium_pair",
+        },
     }
 
     def __init__(self) -> None:
@@ -156,16 +162,9 @@ class Lenia(Simulation):
 
         if self._init_mode == "orbium":
             place_orbium(grid, height // 2, width // 2, device)
-        elif self._init_mode == "orbium_swarm":
-            positions = [
-                (height // 3, width // 3),
-                (height // 3, 2 * width // 3),
-                (2 * height // 3, width // 3),
-                (2 * height // 3, 2 * width // 3),
-                (height // 2, width // 2),
-            ]
-            for cy, cx in positions:
-                place_orbium(grid, cy, cx, device)
+        elif self._init_mode == "orbium_pair":
+            place_orbium(grid, height // 4, width // 4, device)
+            place_orbium(grid, 3 * height // 4, 3 * width // 4, device)
 
         return grid
 

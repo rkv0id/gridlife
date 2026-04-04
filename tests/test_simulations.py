@@ -133,8 +133,8 @@ class TestLenia:
         assert grid.sum() > 0
         assert grid.max() > 0.5
 
-    def test_orbium_swarm_init(self) -> None:
-        self.sim.apply_preset_metadata({"_init": "orbium_swarm"})
+    def test_orbium_pair_init(self) -> None:
+        self.sim.apply_preset_metadata({"_init": "orbium_pair"})
         grid = self.sim.init_grid(128, 128, torch.device("cpu"))
         assert grid.sum() > 0
         assert grid.max() > 0.5
@@ -164,10 +164,9 @@ class TestAsymptoticLenia:
         assert grid.min() >= 0.0
         assert grid.max() <= 1.0
 
-    def test_orbium_init(self) -> None:
+    def test_random_init_nonempty(self) -> None:
         grid = self.sim.init_grid(64, 64, torch.device("cpu"))
         assert grid.sum() > 0
-        assert grid.max() > 0.5
 
     def test_palette_shape(self) -> None:
         pal = self.sim.palette()
