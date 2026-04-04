@@ -3,9 +3,9 @@ import torch.nn.functional as F
 
 from gridlife.simulations.base import Param, Simulation
 
-# Orbium bicaudatus from Bert Chan's Lenia Jupyter notebook
-# The canonical Lenia glider creature
-ORBIUM_CELLS = [
+# Orbium bicaudatus from Bert Chan's Lenia Jupyter notebook.
+# Canonical Lenia glider (20x20), paired with R=13, T=10, mu=0.15, sigma=0.014.
+ORBIUM_CELLS: list[list[float]] = [
     [0, 0, 0, 0, 0, 0, 0.1, 0.14, 0.1, 0, 0, 0.03, 0.03, 0, 0, 0.3, 0, 0, 0, 0],
     [0, 0, 0, 0, 0, 0.08, 0.24, 0.3, 0.3, 0.18, 0.14, 0.15, 0.16, 0.15, 0.09, 0.2, 0, 0, 0, 0],
     [
@@ -71,6 +71,18 @@ ORBIUM_CELLS = [
 ]
 
 
+def place_orbium(grid: torch.Tensor, cy: int, cx: int, device: torch.device) -> None:
+    creature = torch.tensor(ORBIUM_CELLS, dtype=torch.float32, device=device)
+    ch, cw = creature.shape
+    y0 = cy - ch // 2
+    x0 = cx - cw // 2
+    y1 = y0 + ch
+    x1 = x0 + cw
+    height, width = grid.shape[1], grid.shape[2]
+    if y0 >= 0 and y1 <= height and x0 >= 0 and x1 <= width:
+        grid[0, y0:y1, x0:x1] = creature
+
+
 class Lenia(Simulation):
     name = "lenia"
     description = "Lenia - Continuous Cellular Automata"
@@ -86,8 +98,6 @@ class Lenia(Simulation):
     presets = {
         "orbium": {"R": 13.0, "T": 10.0, "mu": 0.15, "sigma": 0.014, "_init": "orbium"},
         "orbium_swarm": {"R": 13.0, "T": 10.0, "mu": 0.15, "sigma": 0.014, "_init": "orbium_swarm"},
-        "random_soup": {"R": 13.0, "T": 10.0, "mu": 0.15, "sigma": 0.017, "_init": "random"},
-        "wandering": {"R": 13.0, "T": 10.0, "mu": 0.17, "sigma": 0.015, "_init": "random"},
     }
 
     def __init__(self) -> None:
@@ -95,8 +105,10 @@ class Lenia(Simulation):
         self._kernel_r: float = 0.0
         self._init_mode: str = "orbium"
 
-    def set_init_mode(self, mode: str) -> None:
-        self._init_mode = mode
+    def apply_preset_metadata(self, preset: dict[str, float | str]) -> None:
+        init_mode = preset.get("_init")
+        if isinstance(init_mode, str):
+            self._init_mode = init_mode
 
     def _build_kernel(self, R: float, device: torch.device) -> torch.Tensor:
         if self._kernel is not None and self._kernel_r == R and self._kernel.device == device:
@@ -129,7 +141,6 @@ class Lenia(Simulation):
         h = self.halo_size
 
         kernel = self._build_kernel(R, grid.device)
-
         potential = F.conv2d(grid.unsqueeze(0), kernel).squeeze(0)
 
         trim = h - r
@@ -137,30 +148,14 @@ class Lenia(Simulation):
             potential = potential[:, trim:-trim, trim:-trim]
 
         growth = 2.0 * torch.exp(-((potential - mu) ** 2) / (2.0 * sigma * sigma)) - 1.0
-
         inner = grid[:, h:-h, h:-h]
-
-        result = (inner + (1.0 / T) * growth).clamp(0, 1)
-
-        return result
-
-    def _place_orbium(self, grid: torch.Tensor, cy: int, cx: int, device: torch.device) -> None:
-        creature = torch.tensor(ORBIUM_CELLS, dtype=torch.float32, device=device)
-        ch, cw = creature.shape
-        y0 = cy - ch // 2
-        x0 = cx - cw // 2
-        y1 = y0 + ch
-        x1 = x0 + cw
-        height, width = grid.shape[1], grid.shape[2]
-        if y0 >= 0 and y1 <= height and x0 >= 0 and x1 <= width:
-            grid[0, y0:y1, x0:x1] = creature
+        return (inner + (1.0 / T) * growth).clamp(0, 1)
 
     def init_grid(self, height: int, width: int, device: torch.device) -> torch.Tensor:
         grid = torch.zeros(1, height, width, device=device)
 
         if self._init_mode == "orbium":
-            self._place_orbium(grid, height // 2, width // 2, device)
-
+            place_orbium(grid, height // 2, width // 2, device)
         elif self._init_mode == "orbium_swarm":
             positions = [
                 (height // 3, width // 3),
@@ -170,18 +165,7 @@ class Lenia(Simulation):
                 (height // 2, width // 2),
             ]
             for cy, cx in positions:
-                self._place_orbium(grid, cy, cx, device)
-
-        elif self._init_mode == "random":
-            # Sparse random patches - ALife "primordial soup"
-            n_patches = max(3, (height * width) // 10000)
-            for _ in range(n_patches):
-                cy = int(torch.randint(height // 4, 3 * height // 4, (1,)).item())
-                cx = int(torch.randint(width // 4, 3 * width // 4, (1,)).item())
-                patch_r = 20
-                y0, y1 = max(0, cy - patch_r), min(height, cy + patch_r)
-                x0, x1 = max(0, cx - patch_r), min(width, cx + patch_r)
-                grid[0, y0:y1, x0:x1] = torch.rand(y1 - y0, x1 - x0, device=device)
+                place_orbium(grid, cy, cx, device)
 
         return grid
 

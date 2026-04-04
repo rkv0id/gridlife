@@ -20,11 +20,12 @@ class GrayScott(Simulation):
         "diffusion_v": Param(default=0.105, min=0.0, max=0.3, step=0.01, description="V diffusion"),
         "dt": Param(default=1.0, min=0.1, max=2.0, step=0.1, description="Time step"),
     }
+    # F/k pairs sourced from Karl Sims's tutorial and The Well dataset.
     presets = {
         "mitosis": {"feed_rate": 0.0367, "kill_rate": 0.0649},
         "coral": {"feed_rate": 0.0545, "kill_rate": 0.062},
-        "spirals": {"feed_rate": 0.014, "kill_rate": 0.045},
-        "worms": {"feed_rate": 0.078, "kill_rate": 0.061},
+        "spirals": {"feed_rate": 0.018, "kill_rate": 0.051},
+        "worms": {"feed_rate": 0.058, "kill_rate": 0.065},
         "holes": {"feed_rate": 0.039, "kill_rate": 0.058},
     }
 
@@ -65,7 +66,6 @@ class GrayScott(Simulation):
         grid = torch.zeros(2, height, width, device=device)
         grid[0] = 1.0
 
-        # Seed covers a significant portion of the grid for visible patterns
         cy, cx = height // 2, width // 2
         size = max(10, min(height, width) // 6)
         y0, y1 = cy - size, cy + size

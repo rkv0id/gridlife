@@ -3,8 +3,20 @@ import torch.nn.functional as F
 
 from gridlife.simulations.base import Param, Simulation
 
+# Fixed step size for Euler time integration (SmoothLifeL uses dt~0.05-0.1).
+EULER_DT = 0.1
+
 
 class SmoothLife(Simulation):
+    """
+    SmoothLife (Rafler 2011, arXiv:1111.1567).
+
+    Two rule families. "discrete" uses direct replacement A' = s(n, m) per
+    the original paper. "euler" uses smooth time stepping
+    A' = A + dt * (s(n, m) - A), required for the SmoothLifeL ruleset that
+    produces the famous smooth glider.
+    """
+
     name = "smoothlife"
     description = "SmoothLife - Continuous Game of Life"
     channels = 1
@@ -14,8 +26,8 @@ class SmoothLife(Simulation):
         "ra": Param(default=12.0, min=4.0, max=12.0, step=1.0, description="Outer radius"),
         "b1": Param(default=0.278, min=0.0, max=1.0, step=0.01, description="Birth lower"),
         "b2": Param(default=0.365, min=0.0, max=1.0, step=0.01, description="Birth upper"),
-        "d1": Param(default=0.267, min=0.0, max=1.0, step=0.01, description="Death lower"),
-        "d2": Param(default=0.445, min=0.0, max=1.0, step=0.01, description="Death upper"),
+        "d1": Param(default=0.267, min=0.0, max=1.0, step=0.01, description="Survive lower"),
+        "d2": Param(default=0.445, min=0.0, max=1.0, step=0.01, description="Survive upper"),
         "alpha_n": Param(
             default=0.028, min=0.001, max=0.1, step=0.001, description="Outer sharpness"
         ),
@@ -24,6 +36,7 @@ class SmoothLife(Simulation):
         ),
     }
     presets = {
+        # Rafler paper classic values, discrete time stepping.
         "stable": {
             "ra": 12.0,
             "b1": 0.278,
@@ -32,7 +45,9 @@ class SmoothLife(Simulation):
             "d2": 0.445,
             "alpha_n": 0.028,
             "alpha_m": 0.147,
+            "_mode": "discrete",
         },
+        # SmoothLifeL with Euler integration. Produces the smooth glider.
         "smooth_glider": {
             "ra": 12.0,
             "b1": 0.257,
@@ -41,24 +56,7 @@ class SmoothLife(Simulation):
             "d2": 0.549,
             "alpha_n": 0.028,
             "alpha_m": 0.147,
-        },
-        "waves": {
-            "ra": 12.0,
-            "b1": 0.21,
-            "b2": 0.32,
-            "d1": 0.26,
-            "d2": 0.44,
-            "alpha_n": 0.028,
-            "alpha_m": 0.147,
-        },
-        "blobs": {
-            "ra": 12.0,
-            "b1": 0.281,
-            "b2": 0.365,
-            "d1": 0.267,
-            "d2": 0.47,
-            "alpha_n": 0.028,
-            "alpha_m": 0.147,
+            "_mode": "euler",
         },
     }
 
@@ -66,6 +64,12 @@ class SmoothLife(Simulation):
         self._inner_kernel: torch.Tensor | None = None
         self._outer_kernel: torch.Tensor | None = None
         self._cached_ra: float = 0.0
+        self._mode: str = "discrete"
+
+    def apply_preset_metadata(self, preset: dict[str, float | str]) -> None:
+        mode = preset.get("_mode")
+        if isinstance(mode, str):
+            self._mode = mode
 
     def _build_kernels(self, ra: float, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
         if (
@@ -85,13 +89,11 @@ class SmoothLife(Simulation):
         yy, xx = torch.meshgrid(y, x, indexing="ij")
         dist = torch.sqrt(xx * xx + yy * yy)
 
-        # Anti-aliased inner disk
         inner_mask = (1.0 - (dist - r_inner + 0.5).clamp(0, 1)).clamp(0, 1)
         inner_sum = inner_mask.sum()
         if inner_sum > 0:
             inner_mask = inner_mask / inner_sum
 
-        # Anti-aliased outer annulus
         outer_full = (1.0 - (dist - r_outer + 0.5).clamp(0, 1)).clamp(0, 1)
         outer_inner = (1.0 - (dist - r_inner + 0.5).clamp(0, 1)).clamp(0, 1)
         outer_mask = (outer_full - outer_inner).clamp(0, 1)
@@ -122,11 +124,11 @@ class SmoothLife(Simulation):
         alpha_n: float,
         alpha_m: float,
     ) -> torch.Tensor:
-        """SmoothLife transition s(n,m). Discrete time stepping returns new state."""
+        """Rafler s(n, m) = birth * (1-alive) + survive * alive."""
         alive = self._sigma(m, 0.5, alpha_m)
         birth = self._sigma_interval(n, b1, b2, alpha_n)
-        death = self._sigma_interval(n, d1, d2, alpha_n)
-        return birth * (1.0 - alive) + death * alive
+        survive = self._sigma_interval(n, d1, d2, alpha_n)
+        return birth * (1.0 - alive) + survive * alive
 
     def step(self, grid: torch.Tensor, params: dict[str, float]) -> torch.Tensor:
         ra = params["ra"]
@@ -150,26 +152,26 @@ class SmoothLife(Simulation):
             m = m[:, trim:-trim, trim:-trim]
             n = n[:, trim:-trim, trim:-trim]
 
-        result = self._transition(n, m, b1, b2, d1, d2, alpha_n, alpha_m)
+        s = self._transition(n, m, b1, b2, d1, d2, alpha_n, alpha_m)
 
-        return result.clamp(0, 1)
+        if self._mode == "euler":
+            inner = grid[:, h:-h, h:-h]
+            return (inner + EULER_DT * (s - inner)).clamp(0, 1)
+        return s.clamp(0, 1)
 
     def init_grid(self, height: int, width: int, device: torch.device) -> torch.Tensor:
         grid = torch.zeros(1, height, width, device=device)
-
-        # Scatter random smooth patches for varied initial density
         n_patches = max(5, (height * width) // 5000)
         for _ in range(n_patches):
-            cy = torch.randint(height // 4, 3 * height // 4, (1,)).item()
-            cx = torch.randint(width // 4, 3 * width // 4, (1,)).item()
-            r = torch.randint(8, 20, (1,)).item()
+            cy = int(torch.randint(height // 4, 3 * height // 4, (1,)).item())
+            cx = int(torch.randint(width // 4, 3 * width // 4, (1,)).item())
+            r = int(torch.randint(8, 20, (1,)).item())
 
             y = torch.arange(height, device=device).float() - cy
             x = torch.arange(width, device=device).float() - cx
             yy, xx = torch.meshgrid(y, x, indexing="ij")
             dist = torch.sqrt(xx * xx + yy * yy)
 
-            # Smooth patch with random interior density
             mask = (dist < r).float()
             patch = mask * (0.3 + 0.7 * torch.rand(height, width, device=device))
             grid[0] = (grid[0] + patch).clamp(0, 1)

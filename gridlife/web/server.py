@@ -74,14 +74,17 @@ class SimulationServer:
         if sim_cls is None:
             raise ValueError(f"Unknown simulation: {sim_name}")
 
-        # Preserve init mode across re-initialization if the simulation supports it
-        init_mode = None
-        if self.simulation is not None and hasattr(self.simulation, "_init_mode"):
-            init_mode = self.simulation._init_mode  # type: ignore[attr-defined]
+        # Carry forward instance-level preset state across rebuild so reset
+        # and preset changes preserve the user's selected init/timestep mode.
+        prev_init_mode = getattr(self.simulation, "_init_mode", None)
+        prev_mode = getattr(self.simulation, "_mode", None)
 
         self.simulation = sim_cls()
-        if init_mode is not None and hasattr(self.simulation, "set_init_mode"):
-            self.simulation.set_init_mode(init_mode)  # type: ignore[attr-defined]
+
+        if isinstance(prev_init_mode, str) and hasattr(self.simulation, "_init_mode"):
+            self.simulation._init_mode = prev_init_mode  # type: ignore[attr-defined]
+        if isinstance(prev_mode, str) and hasattr(self.simulation, "_mode"):
+            self.simulation._mode = prev_mode  # type: ignore[attr-defined]
 
         if self.coordinator_factory:
             self.coordinator = self.coordinator_factory(self.simulation)
@@ -262,7 +265,6 @@ class SimulationServer:
 
         elif msg_type == "set_params" and self.coordinator is not None:
             params = msg.get("params", {})
-            # Filter out metadata keys starting with _
             clean_params = {k: v for k, v in params.items() if not k.startswith("_")}
             self.coordinator.update_params(clean_params)
 
@@ -274,28 +276,24 @@ class SimulationServer:
             if preset is None:
                 return
 
-            # Extract init mode if present, strip metadata keys
-            init_mode = preset.get("_init")
+            # Let the sim absorb metadata (_init, _mode) onto the current instance.
+            # _init_simulation will carry that state forward to the fresh instance.
+            self.simulation.apply_preset_metadata(preset)
+
             clean_params: dict[str, float] = {
-                k: v
+                k: float(v)
                 for k, v in preset.items()
                 if not k.startswith("_") and isinstance(v, int | float)
             }
 
-            if self.simulation.preset_only:
-                # Preset change resets the simulation
-                self.running = False
-                await asyncio.sleep(0.05)
-                if init_mode is not None and hasattr(self.simulation, "set_init_mode"):
-                    self.simulation.set_init_mode(init_mode)  # type: ignore[attr-defined]
-                sim_name = self.simulation.name
-                self._init_simulation(sim_name)
-                if self.coordinator:
-                    self.coordinator.update_params(clean_params)
-                await self._send_frame()
-            else:
-                # Slider-based sim: just apply params without reset
+            # Always rebuild the grid on preset change.
+            self.running = False
+            await asyncio.sleep(0.05)
+            sim_name = self.simulation.name
+            self._init_simulation(sim_name)
+            if self.coordinator:
                 self.coordinator.update_params(clean_params)
+            await self._send_frame()
 
         elif msg_type == "set_workers" and self.coordinator is not None:
             count = msg.get("count", self.num_workers)

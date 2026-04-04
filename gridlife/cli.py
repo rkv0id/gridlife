@@ -124,24 +124,17 @@ def run(
 
     simulation = sim_cls()
 
-    # Apply preset first, then parameter overrides
     active_params = simulation.default_params()
     if preset:
         if preset in simulation.presets:
             preset_data = simulation.presets[preset]
-            # Strip metadata keys starting with _
+            simulation.apply_preset_metadata(preset_data)
             clean_preset: dict[str, float] = {
-                k: v
+                k: float(v)
                 for k, v in preset_data.items()
                 if not k.startswith("_") and isinstance(v, int | float)
             }
             active_params.update(clean_preset)
-
-            # Apply init mode if present and supported
-            init_mode = preset_data.get("_init")
-            if init_mode is not None and hasattr(simulation, "set_init_mode"):
-                simulation.set_init_mode(init_mode)
-
             typer.echo(f"Using preset: {preset}")
         else:
             typer.echo(
@@ -162,13 +155,12 @@ def run(
 
     typer.echo(f"Running {simulation.name} ({width}x{height}), {workers} workers, {steps} steps")
 
-    # Determine if we need to capture frames for GIF
     capturing = output is not None and output.endswith(".gif")
     frame_interval = 1
     frames: list[bytes] = []
 
     if capturing:
-        total_frames = min(steps, fps * 30)  # cap at 30 seconds of GIF
+        total_frames = min(steps, fps * 30)
         frame_interval = max(1, steps // total_frames)
         typer.echo(f"Capturing frame every {frame_interval} steps ({total_frames} frames)")
 

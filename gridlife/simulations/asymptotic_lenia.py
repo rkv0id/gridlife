@@ -2,15 +2,16 @@ import torch
 import torch.nn.functional as F
 
 from gridlife.simulations.base import Param, Simulation
+from gridlife.simulations.lenia import place_orbium
 
 
 class AsymptoticLenia(Simulation):
     """
     Asymptotic Lenia (Kawaguchi et al. 2021).
 
-    Update rule: dA/dt = T(K*A) - A, where T(u) = (G(u) + 1) / 2
-    Replaces Lenia's clipping with an asymptotic target function.
-    Produces interesting patterns more reliably from random initial conditions.
+    Update rule: A_t+dt = A_t + dt * (T(K*A) - A_t), where T(u) = (G(u) + 1) / 2.
+    Seeded with a Lenia Orbium; ALenia preserves the glider in a slightly
+    different basin than Lenia's clipped dynamics.
     """
 
     name = "asymptotic_lenia"
@@ -22,18 +23,28 @@ class AsymptoticLenia(Simulation):
         "R": Param(default=13.0, min=5.0, max=13.0, step=1.0, description="Kernel radius"),
         "dt": Param(default=0.1, min=0.01, max=0.3, step=0.01, description="Time step"),
         "mu": Param(default=0.15, min=0.0, max=0.5, step=0.01, description="Target center"),
-        "sigma": Param(default=0.017, min=0.001, max=0.1, step=0.001, description="Target width"),
+        "sigma": Param(default=0.015, min=0.001, max=0.1, step=0.001, description="Target width"),
     }
     presets = {
-        "solitons": {"R": 13.0, "dt": 0.1, "mu": 0.15, "sigma": 0.017},
-        "rotators": {"R": 13.0, "dt": 0.1, "mu": 0.17, "sigma": 0.015},
-        "chaotic": {"R": 13.0, "dt": 0.1, "mu": 0.14, "sigma": 0.025},
-        "waves": {"R": 13.0, "dt": 0.1, "mu": 0.20, "sigma": 0.03},
+        "orbium": {"R": 13.0, "dt": 0.1, "mu": 0.15, "sigma": 0.015, "_init": "orbium"},
+        "orbium_swarm": {
+            "R": 13.0,
+            "dt": 0.1,
+            "mu": 0.15,
+            "sigma": 0.015,
+            "_init": "orbium_swarm",
+        },
     }
 
     def __init__(self) -> None:
         self._kernel: torch.Tensor | None = None
         self._kernel_r: float = 0.0
+        self._init_mode: str = "orbium"
+
+    def apply_preset_metadata(self, preset: dict[str, float | str]) -> None:
+        init_mode = preset.get("_init")
+        if isinstance(init_mode, str):
+            self._init_mode = init_mode
 
     def _build_kernel(self, R: float, device: torch.device) -> torch.Tensor:
         if self._kernel is not None and self._kernel_r == R and self._kernel.device == device:
@@ -66,43 +77,36 @@ class AsymptoticLenia(Simulation):
         h = self.halo_size
 
         kernel = self._build_kernel(R, grid.device)
-
         potential = F.conv2d(grid.unsqueeze(0), kernel).squeeze(0)
 
         trim = h - r
         if trim > 0:
             potential = potential[:, trim:-trim, trim:-trim]
 
-        # Target function: T(u) = (G(u) + 1) / 2
-        # G(u) = 2*exp(-((u-mu)/sigma)^2 / 2) - 1
-        # So T(u) = exp(-((u-mu)/sigma)^2 / 2)
+        # T(u) = (G(u)+1)/2 = exp(-(u-mu)^2 / (2*sigma^2))
         target = torch.exp(-((potential - mu) ** 2) / (2.0 * sigma * sigma))
-
         inner = grid[:, h:-h, h:-h]
-
-        # dA/dt = T(K*A) - A, discretized as A += dt * (T - A)
-        result = (inner + dt * (target - inner)).clamp(0, 1)
-
-        return result
+        return (inner + dt * (target - inner)).clamp(0, 1)
 
     def init_grid(self, height: int, width: int, device: torch.device) -> torch.Tensor:
         grid = torch.zeros(1, height, width, device=device)
 
-        # Asymptotic Lenia produces interesting patterns from random init
-        # Several random patches seed the dynamics
-        n_patches = max(3, (height * width) // 10000)
-        for _ in range(n_patches):
-            cy = int(torch.randint(height // 4, 3 * height // 4, (1,)).item())
-            cx = int(torch.randint(width // 4, 3 * width // 4, (1,)).item())
-            patch_r = 20
-            y0, y1 = max(0, cy - patch_r), min(height, cy + patch_r)
-            x0, x1 = max(0, cx - patch_r), min(width, cx + patch_r)
-            grid[0, y0:y1, x0:x1] = torch.rand(y1 - y0, x1 - x0, device=device)
+        if self._init_mode == "orbium":
+            place_orbium(grid, height // 2, width // 2, device)
+        elif self._init_mode == "orbium_swarm":
+            positions = [
+                (height // 3, width // 3),
+                (height // 3, 2 * width // 3),
+                (2 * height // 3, width // 3),
+                (2 * height // 3, 2 * width // 3),
+                (height // 2, width // 2),
+            ]
+            for cy, cx in positions:
+                place_orbium(grid, cy, cx, device)
 
         return grid
 
     def palette(self) -> torch.Tensor:
-        # Cool purple-magenta gradient to distinguish from Lenia's warm tones
         pal = torch.zeros(256, 3, dtype=torch.uint8)
         for i in range(256):
             t = i / 255.0

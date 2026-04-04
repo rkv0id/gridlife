@@ -23,7 +23,6 @@ class Simulation:
     halo_size: int = 1
     params: dict[str, Param] = {}
     presets: dict[str, dict[str, float | str]] = {}
-
     # If True, UI hides sliders and only shows preset selector.
     # Changing presets resets the simulation.
     preset_only: bool = False
@@ -61,3 +60,7 @@ class Simulation:
 
     def default_params(self) -> dict[str, float]:
         return {k: v.default for k, v in self.params.items()}
+
+    def apply_preset_metadata(self, preset: dict[str, float | str]) -> None:
+        """Override to consume any underscore-prefixed metadata keys from a preset."""
+        pass
