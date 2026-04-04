@@ -43,14 +43,13 @@ class GrayScott(Simulation):
 
         lap_kernel = self._laplacian.to(grid.device)
 
-        # grid: (2, H+2, W+2) - split channels, add batch dim for conv2d
-        u_padded = grid[0:1].unsqueeze(0)  # (1, 1, H+2, W+2)
+        u_padded = grid[0:1].unsqueeze(0)
         v_padded = grid[1:2].unsqueeze(0)
 
-        lap_u = F.conv2d(u_padded, lap_kernel).squeeze(0)  # (1, H, W)
+        lap_u = F.conv2d(u_padded, lap_kernel).squeeze(0)
         lap_v = F.conv2d(v_padded, lap_kernel).squeeze(0)
 
-        u = grid[0:1, 1:-1, 1:-1]  # (1, H, W)
+        u = grid[0:1, 1:-1, 1:-1]
         v = grid[1:2, 1:-1, 1:-1]
 
         uvv = u * v * v
@@ -66,9 +65,9 @@ class GrayScott(Simulation):
         grid = torch.zeros(2, height, width, device=device)
         grid[0] = 1.0
 
-        # Single centered seed, sized relative to grid
+        # Seed covers a significant portion of the grid for visible patterns
         cy, cx = height // 2, width // 2
-        size = max(8, min(height, width) // 8)
+        size = max(10, min(height, width) // 6)
         y0, y1 = cy - size, cy + size
         x0, x1 = cx - size, cx + size
         grid[1, y0:y1, x0:x1] = 0.5

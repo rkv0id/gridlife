@@ -10,16 +10,16 @@ class SmoothLife(Simulation):
     channels = 1
     halo_size = 12
     params = {
-        "ra": Param(default=12.0, min=4.0, max=20.0, step=1.0, description="Outer radius"),
+        "ra": Param(default=12.0, min=4.0, max=12.0, step=1.0, description="Outer radius"),
         "b1": Param(default=0.278, min=0.0, max=1.0, step=0.01, description="Birth lower"),
         "b2": Param(default=0.365, min=0.0, max=1.0, step=0.01, description="Birth upper"),
         "d1": Param(default=0.267, min=0.0, max=1.0, step=0.01, description="Death lower"),
         "d2": Param(default=0.445, min=0.0, max=1.0, step=0.01, description="Death upper"),
         "alpha_n": Param(
-            default=0.028, min=0.001, max=0.1, step=0.001, description="Outer transition sharpness"
+            default=0.028, min=0.001, max=0.1, step=0.001, description="Outer sharpness"
         ),
         "alpha_m": Param(
-            default=0.147, min=0.001, max=0.5, step=0.001, description="Inner transition sharpness"
+            default=0.147, min=0.001, max=0.5, step=0.001, description="Inner sharpness"
         ),
         "dt": Param(default=0.1, min=0.01, max=0.5, step=0.01, description="Time step"),
     }
@@ -45,7 +45,7 @@ class SmoothLife(Simulation):
             "dt": 0.1,
         },
         "ribbons": {
-            "ra": 10.0,
+            "ra": 12.0,
             "b1": 0.241,
             "b2": 0.343,
             "d1": 0.340,
@@ -62,7 +62,6 @@ class SmoothLife(Simulation):
         self._cached_ra: float = 0.0
 
     def _build_kernels(self, ra: float, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
-        """Build inner disk and outer annulus kernels."""
         if (
             self._inner_kernel is not None
             and self._outer_kernel is not None
@@ -80,13 +79,11 @@ class SmoothLife(Simulation):
         yy, xx = torch.meshgrid(y, x, indexing="ij")
         dist = torch.sqrt(xx * xx + yy * yy)
 
-        # Inner disk kernel (for cell state average)
         inner_mask = (dist <= r_inner).float()
         inner_sum = inner_mask.sum()
         if inner_sum > 0:
             inner_mask = inner_mask / inner_sum
 
-        # Outer annulus kernel (for neighborhood average)
         outer_mask = ((dist > r_inner) & (dist <= r_outer)).float()
         outer_sum = outer_mask.sum()
         if outer_sum > 0:
@@ -98,11 +95,9 @@ class SmoothLife(Simulation):
         return self._inner_kernel, self._outer_kernel
 
     def _sigma(self, x: torch.Tensor, a: float, alpha: float) -> torch.Tensor:
-        """Smooth step function (logistic sigmoid)."""
         return 1.0 / (1.0 + torch.exp(-(x - a) / alpha))
 
     def _sigma_interval(self, x: torch.Tensor, a: float, b: float, alpha: float) -> torch.Tensor:
-        """Smooth interval function: high when a < x < b."""
         return self._sigma(x, a, alpha) * (1.0 - self._sigma(x, b, alpha))
 
     def step(self, grid: torch.Tensor, params: dict[str, float]) -> torch.Tensor:
@@ -116,12 +111,19 @@ class SmoothLife(Simulation):
         dt = params["dt"]
 
         r = int(ra)
+        h = self.halo_size
         inner_k, outer_k = self._build_kernels(ra, grid.device)
 
-        # grid: (1, H+2r, W+2r) -> (N, C, H, W) for conv2d
+        # grid: (1, H+2h, W+2h), conv2d strips r on each side
         grid4d = grid.unsqueeze(0)
         m = F.conv2d(grid4d, inner_k).squeeze(0)
         n = F.conv2d(grid4d, outer_k).squeeze(0)
+
+        # Trim extra if kernel radius < halo_size
+        trim = h - r
+        if trim > 0:
+            m = m[:, trim:-trim, trim:-trim]
+            n = n[:, trim:-trim, trim:-trim]
 
         alive = self._sigma(m, 0.5, alpha_m)
         birth = self._sigma_interval(n, b1, b2, alpha_n)
@@ -129,35 +131,33 @@ class SmoothLife(Simulation):
 
         transition = birth * (1.0 - alive) + death * alive
 
-        inner = grid[:, r : grid.shape[1] - r, r : grid.shape[2] - r]
+        inner = grid[:, h:-h, h:-h]
 
         result = (inner + dt * (2.0 * transition - 1.0)).clamp(0, 1)
 
         return result
 
     def init_grid(self, height: int, width: int, device: torch.device) -> torch.Tensor:
-        # Random smooth blobs
         grid = torch.zeros(1, height, width, device=device)
 
-        # Several random circular blobs
-        n_blobs = max(5, (height * width) // 5000)
+        # Random circles for interesting initial conditions
+        n_blobs = max(8, (height * width) // 3000)
         for _ in range(n_blobs):
             cy = torch.randint(0, height, (1,)).item()
             cx = torch.randint(0, width, (1,)).item()
-            r = torch.randint(5, max(6, min(height, width) // 8), (1,)).item()
+            r = torch.randint(8, max(9, min(height, width) // 6), (1,)).item()
 
             y = torch.arange(height, device=device).float() - cy
             x = torch.arange(width, device=device).float() - cx
             yy, xx = torch.meshgrid(y, x, indexing="ij")
             dist = torch.sqrt(xx * xx + yy * yy)
 
-            blob = torch.exp(-((dist / (r * 0.4)) ** 2))
+            blob = (dist < r).float()
             grid[0] = (grid[0] + blob).clamp(0, 1)
 
         return grid
 
     def palette(self) -> torch.Tensor:
-        # Cool blue-teal gradient
         pal = torch.zeros(256, 3, dtype=torch.uint8)
         for i in range(256):
             t = i / 255.0
