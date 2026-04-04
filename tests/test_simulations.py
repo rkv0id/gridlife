@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 
+from gridlife.simulations.asymptotic_lenia import AsymptoticLenia
 from gridlife.simulations.base import Simulation
 from gridlife.simulations.game_of_life import GameOfLife
 from gridlife.simulations.gray_scott import GrayScott
@@ -126,6 +127,8 @@ class TestGrayScott:
         valid_keys = set(self.sim.params.keys())
         for preset_name, preset_vals in self.sim.presets.items():
             for k in preset_vals:
+                if k.startswith("_"):
+                    continue
                 assert k in valid_keys, f"Preset '{preset_name}' has invalid key '{k}'"
 
     def test_palette_shape(self) -> None:
@@ -150,10 +153,50 @@ class TestLenia:
         assert grid.min() >= 0.0
         assert grid.max() <= 1.0
 
+    def test_orbium_init(self) -> None:
+        """Orbium creature should produce a non-empty grid."""
+        self.sim.set_init_mode("orbium")
+        grid = self.sim.init_grid(64, 64, torch.device("cpu"))
+        assert grid.sum() > 0
+        assert grid.max() > 0.5
+
+    def test_random_init(self) -> None:
+        self.sim.set_init_mode("random")
+        grid = self.sim.init_grid(64, 64, torch.device("cpu"))
+        assert grid.sum() > 0
+
     def test_palette_shape(self) -> None:
         pal = self.sim.palette()
         assert pal.shape == (256, 3)
         assert pal.dtype == torch.uint8
+
+    def test_preset_only_flag(self) -> None:
+        assert self.sim.preset_only is True
+
+
+class TestAsymptoticLenia:
+    def setup_method(self) -> None:
+        self.sim = AsymptoticLenia()
+
+    def test_step_preserves_shape(self) -> None:
+        grid = self.sim.init_grid(64, 64, torch.device("cpu"))
+        result = pad_and_step(self.sim, grid)
+        assert result.shape == grid.shape
+
+    def test_step_values_bounded(self) -> None:
+        grid = self.sim.init_grid(64, 64, torch.device("cpu"))
+        for _ in range(20):
+            grid = pad_and_step(self.sim, grid)
+        assert grid.min() >= 0.0
+        assert grid.max() <= 1.0
+
+    def test_palette_shape(self) -> None:
+        pal = self.sim.palette()
+        assert pal.shape == (256, 3)
+        assert pal.dtype == torch.uint8
+
+    def test_preset_only_flag(self) -> None:
+        assert self.sim.preset_only is True
 
 
 class TestSmoothLife:
@@ -176,3 +219,6 @@ class TestSmoothLife:
         pal = self.sim.palette()
         assert pal.shape == (256, 3)
         assert pal.dtype == torch.uint8
+
+    def test_preset_only_flag(self) -> None:
+        assert self.sim.preset_only is True

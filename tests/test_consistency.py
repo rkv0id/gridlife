@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from gridlife.engine.partition import merge_strips, split_grid
+from gridlife.simulations.asymptotic_lenia import AsymptoticLenia
 from gridlife.simulations.base import Simulation
 from gridlife.simulations.game_of_life import GameOfLife
 from gridlife.simulations.gray_scott import GrayScott
@@ -107,6 +108,10 @@ class TestMultiWorkerConsistency:
     def test_lenia_even_split(self) -> None:
         sim = Lenia()
         # Lenia has halo_size=13, needs height > 2*13 per worker
+        self._check_consistency(sim, 64, 64, 10, [2])
+
+    def test_asymptotic_lenia_even_split(self) -> None:
+        sim = AsymptoticLenia()
         self._check_consistency(sim, 64, 64, 10, [2])
 
     def test_smoothlife_even_split(self) -> None:

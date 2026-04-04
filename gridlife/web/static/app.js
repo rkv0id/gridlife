@@ -144,31 +144,39 @@ function updateStatusInfo() {
 }
 
 function updateSimUI(info) {
+    const paramsSection = document.getElementById("params-section");
     const container = document.getElementById("params-container");
     container.innerHTML = "";
-    for (const [key, param] of Object.entries(info.params || {})) {
-        const row = document.createElement("div");
-        row.className = "param-row";
 
-        const label = document.createElement("div");
-        label.className = "param-label";
-        label.innerHTML = `<span>${key}</span><span class="val">${param.default}</span>`;
+    // Hide parameter sliders for preset-only simulations
+    if (info.preset_only) {
+        if (paramsSection) paramsSection.style.display = "none";
+    } else {
+        if (paramsSection) paramsSection.style.display = "block";
+        for (const [key, param] of Object.entries(info.params || {})) {
+            const row = document.createElement("div");
+            row.className = "param-row";
 
-        const slider = document.createElement("input");
-        slider.type = "range";
-        slider.min = param.min;
-        slider.max = param.max;
-        slider.step = param.step;
-        slider.value = param.default;
+            const label = document.createElement("div");
+            label.className = "param-label";
+            label.innerHTML = `<span>${key}</span><span class="val">${param.default}</span>`;
 
-        slider.addEventListener("input", () => {
-            label.querySelector(".val").textContent = parseFloat(slider.value).toFixed(4);
-            sendParams();
-        });
+            const slider = document.createElement("input");
+            slider.type = "range";
+            slider.min = param.min;
+            slider.max = param.max;
+            slider.step = param.step;
+            slider.value = param.default;
 
-        row.appendChild(label);
-        row.appendChild(slider);
-        container.appendChild(row);
+            slider.addEventListener("input", () => {
+                label.querySelector(".val").textContent = parseFloat(slider.value).toFixed(4);
+                sendParams();
+            });
+
+            row.appendChild(label);
+            row.appendChild(slider);
+            container.appendChild(row);
+        }
     }
 
     const presetsSection = document.getElementById("presets-section");
@@ -278,18 +286,21 @@ document.getElementById("sim-select").addEventListener("change", (e) => {
 // Presets
 document.getElementById("preset-select").addEventListener("change", (e) => {
     if (!simInfo || !e.target.value) return;
-    const preset = simInfo.presets[e.target.value];
-    if (!preset) return;
+    send({ type: "apply_preset", preset: e.target.value });
 
-    document.querySelectorAll("#params-container .param-row").forEach((row) => {
-        const key = row.querySelector(".param-label span").textContent;
-        if (key in preset) {
-            const slider = row.querySelector("input");
-            slider.value = preset[key];
-            row.querySelector(".val").textContent = preset[key];
-        }
-    });
-    sendParams();
+    // For slider-based sims, also sync the slider UI
+    if (!simInfo.preset_only) {
+        const preset = simInfo.presets[e.target.value];
+        if (!preset) return;
+        document.querySelectorAll("#params-container .param-row").forEach((row) => {
+            const key = row.querySelector(".param-label span").textContent;
+            if (key in preset) {
+                const slider = row.querySelector("input");
+                slider.value = preset[key];
+                row.querySelector(".val").textContent = preset[key];
+            }
+        });
+    }
 });
 
 // Worker slider

@@ -128,7 +128,20 @@ def run(
     active_params = simulation.default_params()
     if preset:
         if preset in simulation.presets:
-            active_params.update(simulation.presets[preset])
+            preset_data = simulation.presets[preset]
+            # Strip metadata keys starting with _
+            clean_preset: dict[str, float] = {
+                k: v
+                for k, v in preset_data.items()
+                if not k.startswith("_") and isinstance(v, int | float)
+            }
+            active_params.update(clean_preset)
+
+            # Apply init mode if present and supported
+            init_mode = preset_data.get("_init")
+            if init_mode is not None and hasattr(simulation, "set_init_mode"):
+                simulation.set_init_mode(init_mode)
+
             typer.echo(f"Using preset: {preset}")
         else:
             typer.echo(
@@ -197,12 +210,13 @@ def run(
 @app.command(name="list")
 def list_sims() -> None:
     """List available simulations."""
+    from gridlife.simulations.asymptotic_lenia import AsymptoticLenia
     from gridlife.simulations.game_of_life import GameOfLife
     from gridlife.simulations.gray_scott import GrayScott
     from gridlife.simulations.lenia import Lenia
     from gridlife.simulations.smoothlife import SmoothLife
 
-    for sim_cls in [GameOfLife, GrayScott, Lenia, SmoothLife]:
+    for sim_cls in [GameOfLife, GrayScott, Lenia, AsymptoticLenia, SmoothLife]:
         s = sim_cls()
         params_str = ", ".join(s.params.keys()) if s.params else "none"
         typer.echo(f"  {s.name:20s} {s.description}")
@@ -215,6 +229,7 @@ def list_sims() -> None:
 
 
 def _get_simulation(name: str) -> type | None:
+    from gridlife.simulations.asymptotic_lenia import AsymptoticLenia
     from gridlife.simulations.game_of_life import GameOfLife
     from gridlife.simulations.gray_scott import GrayScott
     from gridlife.simulations.lenia import Lenia
@@ -224,6 +239,7 @@ def _get_simulation(name: str) -> type | None:
         "game_of_life": GameOfLife,
         "gray_scott": GrayScott,
         "lenia": Lenia,
+        "asymptotic_lenia": AsymptoticLenia,
         "smoothlife": SmoothLife,
     }
     return sims.get(name)

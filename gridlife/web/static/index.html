@@ -25,7 +25,7 @@
                     <label>Simulation</label>
                     <select id="sim-select"></select>
                 </section>
-                <section id="presets-section" style="display:none">
+                <section id="presets-section" style="display: none;">
                     <label>Preset</label>
                     <select id="preset-select"></select>
                 </section>
@@ -42,9 +42,9 @@
                 </section>
                 <section>
                     <label>Performance</label>
-                    <div id="metrics" class="metrics">
-                        <div>step: <span id="m-step">-</span>ms</div>
-                        <div>halo: <span id="m-halo">-</span>ms</div>
+                    <div class="metrics">
+                        <div>step: <span id="m-step">0</span>ms</div>
+                        <div>halo: <span id="m-halo">0</span>ms</div>
                         <div>steps: <span id="m-steps">0</span></div>
                     </div>
                 </section>
@@ -59,8 +59,8 @@
             </aside>
         </div>
         <footer>
-            <span class="status-left" id="status-bar">connecting...</span>
-            <span class="status-right" id="status-info"></span>
+            <span id="status-bar" class="status-left">connecting...</span>
+            <span id="status-info" class="status-right"></span>
         </footer>
     </div>
     <script src="/static/app.js"></script>

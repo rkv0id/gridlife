@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from gridlife.engine.coordinator import Coordinator
+from gridlife.simulations.asymptotic_lenia import AsymptoticLenia
 from gridlife.simulations.base import Simulation
 from gridlife.simulations.game_of_life import GameOfLife
 from gridlife.simulations.gray_scott import GrayScott
@@ -24,6 +25,7 @@ SIMULATIONS: dict[str, type[Simulation]] = {
     "game_of_life": GameOfLife,
     "gray_scott": GrayScott,
     "lenia": Lenia,
+    "asymptotic_lenia": AsymptoticLenia,
     "smoothlife": SmoothLife,
 }
 
@@ -72,7 +74,15 @@ class SimulationServer:
         if sim_cls is None:
             raise ValueError(f"Unknown simulation: {sim_name}")
 
+        # Preserve init mode across re-initialization if the simulation supports it
+        init_mode = None
+        if self.simulation is not None and hasattr(self.simulation, "_init_mode"):
+            init_mode = self.simulation._init_mode  # type: ignore[attr-defined]
+
         self.simulation = sim_cls()
+        if init_mode is not None and hasattr(self.simulation, "set_init_mode"):
+            self.simulation.set_init_mode(init_mode)  # type: ignore[attr-defined]
+
         if self.coordinator_factory:
             self.coordinator = self.coordinator_factory(self.simulation)
         else:
@@ -252,7 +262,40 @@ class SimulationServer:
 
         elif msg_type == "set_params" and self.coordinator is not None:
             params = msg.get("params", {})
-            self.coordinator.update_params(params)
+            # Filter out metadata keys starting with _
+            clean_params = {k: v for k, v in params.items() if not k.startswith("_")}
+            self.coordinator.update_params(clean_params)
+
+        elif msg_type == "apply_preset" and self.coordinator is not None:
+            preset_name = msg.get("preset")
+            if self.simulation is None or preset_name is None:
+                return
+            preset = self.simulation.presets.get(preset_name)
+            if preset is None:
+                return
+
+            # Extract init mode if present, strip metadata keys
+            init_mode = preset.get("_init")
+            clean_params: dict[str, float] = {
+                k: v
+                for k, v in preset.items()
+                if not k.startswith("_") and isinstance(v, int | float)
+            }
+
+            if self.simulation.preset_only:
+                # Preset change resets the simulation
+                self.running = False
+                await asyncio.sleep(0.05)
+                if init_mode is not None and hasattr(self.simulation, "set_init_mode"):
+                    self.simulation.set_init_mode(init_mode)  # type: ignore[attr-defined]
+                sim_name = self.simulation.name
+                self._init_simulation(sim_name)
+                if self.coordinator:
+                    self.coordinator.update_params(clean_params)
+                await self._send_frame()
+            else:
+                # Slider-based sim: just apply params without reset
+                self.coordinator.update_params(clean_params)
 
         elif msg_type == "set_workers" and self.coordinator is not None:
             count = msg.get("count", self.num_workers)
@@ -333,6 +376,7 @@ class SimulationServer:
             "channels": self.simulation.channels,
             "width": self.width,
             "height": self.height,
+            "preset_only": self.simulation.preset_only,
             "params": {
                 k: {
                     "default": v.default,

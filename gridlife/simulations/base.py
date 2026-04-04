@@ -22,7 +22,11 @@ class Simulation:
     channels: int = 1
     halo_size: int = 1
     params: dict[str, Param] = {}
-    presets: dict[str, dict[str, float]] = {}
+    presets: dict[str, dict[str, float | str]] = {}
+
+    # If True, UI hides sliders and only shows preset selector.
+    # Changing presets resets the simulation.
+    preset_only: bool = False
 
     def step(self, grid: torch.Tensor, params: dict[str, float]) -> torch.Tensor:
         """
