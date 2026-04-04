@@ -3,6 +3,33 @@ import torch.nn.functional as F
 
 from gridlife.simulations.base import Param, Simulation
 
+# Orbium bicaudatus initial state from Bert Chan's Lenia notebook
+# R=13, mu=0.15, sigma=0.014, dt=0.1
+# fmt: off
+ORBIUM_CELLS = [
+    [0,0,0,0,0,0,0.1,0.14,0.1,0,0,0.03,0.03,0,0,0.3,0,0,0,0],
+    [0,0,0,0,0,0.08,0.24,0.3,0.3,0.18,0.14,0.15,0.16,0.15,0.09,0.2,0,0,0,0],
+    [0,0,0,0,0,0.15,0.34,0.44,0.46,0.38,0.18,0.14,0.11,0.13,0.19,0.18,0.45,0,0,0],
+    [0,0,0,0,0.06,0.13,0.39,0.5,0.5,0.37,0.06,0,0,0,0.02,0.16,0.68,0,0,0],
+    [0,0,0,0.11,0.17,0.17,0.33,0.4,0.38,0.28,0.14,0,0,0,0,0,0.18,0.42,0,0],
+    [0,0,0.09,0.18,0.13,0.06,0.08,0.26,0.32,0.32,0.27,0,0,0,0,0,0,0.82,0,0],
+    [0.27,0,0.16,0.12,0,0,0,0.25,0.38,0.44,0.45,0.34,0,0,0,0,0,0.22,0.17,0],
+    [0,0.07,0.2,0.02,0,0,0,0.31,0.48,0.57,0.6,0.57,0,0,0,0,0,0,0.49,0],
+    [0,0.59,0.19,0,0,0,0,0.2,0.57,0.69,0.76,0.76,0.49,0,0,0,0,0,0.36,0],
+    [0,0.58,0.19,0,0,0,0,0,0.67,0.83,0.9,0.92,0.87,0.12,0,0,0,0,0.22,0.07],
+    [0,0,0.46,0,0,0,0,0,0.7,0.93,1,1,1,0.61,0,0,0,0,0.18,0.11],
+    [0,0,0.82,0,0,0,0,0,0.47,1,1,0.98,1,0.96,0.27,0,0,0,0.19,0.1],
+    [0,0,0.46,0,0,0,0,0,0.25,1,1,0.84,0.92,0.97,0.54,0.14,0.04,0.1,0.21,0.05],
+    [0,0,0,0.4,0,0,0,0,0.09,0.95,1,0.78,0.8,0.83,0.45,0.15,0.17,0.21,0.09,0],
+    [0,0,0,0.36,0.1,0,0,0,0.05,0.89,0.98,0.77,0.68,0.48,0.06,0,0.16,0.19,0,0],
+    [0,0,0,0.01,0.3,0.07,0,0,0.08,0.65,0.92,0.74,0.45,0.16,0,0,0.12,0.21,0,0],
+    [0,0,0,0,0.1,0.24,0.14,0.1,0.15,0.34,0.71,0.71,0.28,0,0,0.03,0.15,0.12,0.02,0],
+    [0,0,0,0,0,0.08,0.21,0.21,0.22,0.17,0.36,0.53,0.15,0,0,0.07,0.17,0.07,0,0],
+    [0,0,0,0,0,0,0.03,0.13,0.19,0.22,0.19,0.2,0.05,0,0,0.09,0.14,0.04,0,0],
+    [0,0,0,0,0,0,0,0,0.02,0.06,0.08,0.09,0.07,0.02,0,0.01,0.07,0.03,0,0],
+]
+# fmt: on
+
 
 class Lenia(Simulation):
     name = "lenia"
@@ -13,13 +40,13 @@ class Lenia(Simulation):
         "R": Param(default=13.0, min=5.0, max=13.0, step=1.0, description="Kernel radius"),
         "T": Param(default=10.0, min=1.0, max=20.0, step=1.0, description="Time step divisor"),
         "mu": Param(default=0.15, min=0.0, max=0.5, step=0.01, description="Growth center"),
-        "sigma": Param(default=0.017, min=0.001, max=0.1, step=0.001, description="Growth width"),
+        "sigma": Param(default=0.014, min=0.001, max=0.1, step=0.001, description="Growth width"),
     }
     presets = {
-        "orbium": {"R": 13.0, "T": 10.0, "mu": 0.15, "sigma": 0.017},
-        "geminium": {"R": 10.0, "T": 10.0, "mu": 0.14, "sigma": 0.014},
-        "smooth_blob": {"R": 13.0, "T": 10.0, "mu": 0.12, "sigma": 0.02},
-        "pulsing": {"R": 13.0, "T": 10.0, "mu": 0.21, "sigma": 0.03},
+        "orbium": {"R": 13.0, "T": 10.0, "mu": 0.15, "sigma": 0.014},
+        "vibrating": {"R": 13.0, "T": 10.0, "mu": 0.15, "sigma": 0.03},
+        "wanderer": {"R": 13.0, "T": 10.0, "mu": 0.21, "sigma": 0.02},
+        "slow_drift": {"R": 10.0, "T": 10.0, "mu": 0.12, "sigma": 0.016},
     }
 
     def __init__(self) -> None:
@@ -27,7 +54,6 @@ class Lenia(Simulation):
         self._kernel_r: float = 0.0
 
     def _build_kernel(self, R: float, device: torch.device) -> torch.Tensor:
-        """Build the ring-shaped Lenia kernel. Cached until R changes."""
         if self._kernel is not None and self._kernel_r == R and self._kernel.device == device:
             return self._kernel
 
@@ -59,19 +85,15 @@ class Lenia(Simulation):
 
         kernel = self._build_kernel(R, grid.device)
 
-        # grid: (1, H+2h, W+2h) where h = halo_size (max radius)
-        # conv2d with kernel (2r+1) strips r on each side
         potential = F.conv2d(grid.unsqueeze(0), kernel).squeeze(0)
 
-        # potential is (1, H+2h-2r, W+2h-2r)
-        # We need the center (1, H, W) region
+        # Trim extra if kernel radius < halo_size
         trim = h - r
         if trim > 0:
             potential = potential[:, trim:-trim, trim:-trim]
 
         growth = 2.0 * torch.exp(-((potential - mu) ** 2) / (2.0 * sigma * sigma)) - 1.0
 
-        # Inner owned region: strip halo from input
         inner = grid[:, h:-h, h:-h]
 
         result = (inner + (1.0 / T) * growth).clamp(0, 1)
@@ -81,17 +103,23 @@ class Lenia(Simulation):
     def init_grid(self, height: int, width: int, device: torch.device) -> torch.Tensor:
         grid = torch.zeros(1, height, width, device=device)
 
-        cy, cx = height // 2, width // 2
-        radius = max(10, min(height, width) // 6)
+        creature = torch.tensor(ORBIUM_CELLS, dtype=torch.float32, device=device)
+        ch, cw = creature.shape
 
-        y = torch.arange(height, device=device).float() - cy
-        x = torch.arange(width, device=device).float() - cx
-        yy, xx = torch.meshgrid(y, x, indexing="ij")
-        dist = torch.sqrt(xx * xx + yy * yy)
+        # Place multiple creatures at different positions
+        positions = [
+            (height // 3, width // 3),
+            (height // 3, 2 * width // 3),
+            (2 * height // 3, width // 2),
+        ]
 
-        blob = torch.exp(-((dist / (radius * 0.5)) ** 2))
-        blob = blob * (0.5 + 0.5 * torch.rand(height, width, device=device))
-        grid[0] = blob.clamp(0, 1)
+        for cy, cx in positions:
+            y0 = cy - ch // 2
+            x0 = cx - cw // 2
+            y1 = y0 + ch
+            x1 = x0 + cw
+            if y0 >= 0 and y1 <= height and x0 >= 0 and x1 <= width:
+                grid[0, y0:y1, x0:x1] = creature
 
         return grid
 

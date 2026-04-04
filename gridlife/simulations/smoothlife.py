@@ -21,7 +21,6 @@ class SmoothLife(Simulation):
         "alpha_m": Param(
             default=0.147, min=0.001, max=0.5, step=0.001, description="Inner sharpness"
         ),
-        "dt": Param(default=0.1, min=0.01, max=0.5, step=0.01, description="Time step"),
     }
     presets = {
         "default": {
@@ -32,7 +31,6 @@ class SmoothLife(Simulation):
             "d2": 0.445,
             "alpha_n": 0.028,
             "alpha_m": 0.147,
-            "dt": 0.1,
         },
         "gliders": {
             "ra": 12.0,
@@ -42,17 +40,15 @@ class SmoothLife(Simulation):
             "d2": 0.549,
             "alpha_n": 0.028,
             "alpha_m": 0.147,
-            "dt": 0.1,
         },
-        "ribbons": {
+        "expanding": {
             "ra": 12.0,
-            "b1": 0.241,
-            "b2": 0.343,
-            "d1": 0.340,
-            "d2": 0.518,
+            "b1": 0.21,
+            "b2": 0.32,
+            "d1": 0.26,
+            "d2": 0.44,
             "alpha_n": 0.028,
             "alpha_m": 0.147,
-            "dt": 0.12,
         },
     }
 
@@ -79,12 +75,23 @@ class SmoothLife(Simulation):
         yy, xx = torch.meshgrid(y, x, indexing="ij")
         dist = torch.sqrt(xx * xx + yy * yy)
 
-        inner_mask = (dist <= r_inner).float()
+        # Anti-aliased inner disk
+        inner_mask = (1.0 - (dist - r_inner).clamp(0, 1)).clamp(0, 1)
         inner_sum = inner_mask.sum()
         if inner_sum > 0:
             inner_mask = inner_mask / inner_sum
 
+        # Anti-aliased outer annulus
+        outer_ring = (1.0 - (dist - r_outer).clamp(0, 1)).clamp(0, 1)
+        outer_mask = outer_ring - inner_mask * inner_sum / (inner_sum if inner_sum > 0 else 1.0)
+        # Recompute cleanly: outer annulus = in outer circle but NOT in inner circle
         outer_mask = ((dist > r_inner) & (dist <= r_outer)).float()
+        # Smooth the boundary
+        boundary = (dist > r_inner - 0.5) & (dist <= r_inner + 0.5)
+        outer_mask[boundary] = (dist[boundary] - r_inner + 0.5).clamp(0, 1)
+        boundary_out = (dist > r_outer - 0.5) & (dist <= r_outer + 0.5)
+        outer_mask[boundary_out] = (r_outer + 0.5 - dist[boundary_out]).clamp(0, 1)
+
         outer_sum = outer_mask.sum()
         if outer_sum > 0:
             outer_mask = outer_mask / outer_sum
@@ -95,10 +102,32 @@ class SmoothLife(Simulation):
         return self._inner_kernel, self._outer_kernel
 
     def _sigma(self, x: torch.Tensor, a: float, alpha: float) -> torch.Tensor:
+        """Logistic sigmoid: smooth step at threshold a."""
         return 1.0 / (1.0 + torch.exp(-(x - a) / alpha))
 
     def _sigma_interval(self, x: torch.Tensor, a: float, b: float, alpha: float) -> torch.Tensor:
+        """Smooth interval: ~1 when a < x < b, ~0 otherwise."""
         return self._sigma(x, a, alpha) * (1.0 - self._sigma(x, b, alpha))
+
+    def _transition(
+        self,
+        n: torch.Tensor,
+        m: torch.Tensor,
+        b1: float,
+        b2: float,
+        d1: float,
+        d2: float,
+        alpha_n: float,
+        alpha_m: float,
+    ) -> torch.Tensor:
+        """
+        SmoothLife transition function s(n, m).
+        Discrete time stepping mode: returns the new state directly.
+        """
+        alive = self._sigma(m, 0.5, alpha_m)
+        birth = self._sigma_interval(n, b1, b2, alpha_n)
+        death = self._sigma_interval(n, d1, d2, alpha_n)
+        return birth * (1.0 - alive) + death * alive
 
     def step(self, grid: torch.Tensor, params: dict[str, float]) -> torch.Tensor:
         ra = params["ra"]
@@ -108,16 +137,14 @@ class SmoothLife(Simulation):
         d2 = params["d2"]
         alpha_n = params["alpha_n"]
         alpha_m = params["alpha_m"]
-        dt = params["dt"]
 
         r = int(ra)
         h = self.halo_size
         inner_k, outer_k = self._build_kernels(ra, grid.device)
 
-        # grid: (1, H+2h, W+2h), conv2d strips r on each side
         grid4d = grid.unsqueeze(0)
-        m = F.conv2d(grid4d, inner_k).squeeze(0)
-        n = F.conv2d(grid4d, outer_k).squeeze(0)
+        m = F.conv2d(grid4d, inner_k).squeeze(0)  # inner (cell) average
+        n = F.conv2d(grid4d, outer_k).squeeze(0)  # outer (neighbor) average
 
         # Trim extra if kernel radius < halo_size
         trim = h - r
@@ -125,35 +152,29 @@ class SmoothLife(Simulation):
             m = m[:, trim:-trim, trim:-trim]
             n = n[:, trim:-trim, trim:-trim]
 
-        alive = self._sigma(m, 0.5, alpha_m)
-        birth = self._sigma_interval(n, b1, b2, alpha_n)
-        death = self._sigma_interval(n, d1, d2, alpha_n)
+        # Discrete time stepping: new state = s(n, m) directly
+        result = self._transition(n, m, b1, b2, d1, d2, alpha_n, alpha_m)
 
-        transition = birth * (1.0 - alive) + death * alive
-
-        inner = grid[:, h:-h, h:-h]
-
-        result = (inner + dt * (2.0 * transition - 1.0)).clamp(0, 1)
-
-        return result
+        return result.clamp(0, 1)
 
     def init_grid(self, height: int, width: int, device: torch.device) -> torch.Tensor:
         grid = torch.zeros(1, height, width, device=device)
 
-        # Random circles for interesting initial conditions
-        n_blobs = max(8, (height * width) // 3000)
-        for _ in range(n_blobs):
-            cy = torch.randint(0, height, (1,)).item()
-            cx = torch.randint(0, width, (1,)).item()
-            r = torch.randint(8, max(9, min(height, width) // 6), (1,)).item()
+        # Sparse small circles - not too many, not too large
+        n_circles = max(3, (height * width) // 8000)
+        for _ in range(n_circles):
+            cy = torch.randint(height // 4, 3 * height // 4, (1,)).item()
+            cx = torch.randint(width // 4, 3 * width // 4, (1,)).item()
+            r = torch.randint(4, max(5, min(height, width) // 15), (1,)).item()
 
             y = torch.arange(height, device=device).float() - cy
             x = torch.arange(width, device=device).float() - cx
             yy, xx = torch.meshgrid(y, x, indexing="ij")
             dist = torch.sqrt(xx * xx + yy * yy)
 
-            blob = (dist < r).float()
-            grid[0] = (grid[0] + blob).clamp(0, 1)
+            # Smooth-edged circle
+            circle = (1.0 - ((dist - r) / 2.0).clamp(0, 1)).clamp(0, 1)
+            grid[0] = (grid[0] + circle).clamp(0, 1)
 
         return grid
 
