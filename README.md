@@ -45,7 +45,7 @@ Open `http://localhost:8420`. Click Play. Scroll to zoom (centered on cursor), s
 </p>
 
 <p align="center">
-  <small>Click the GIF to watch the full simulation video</small>
+  <small><i>Click the GIF to watch the full simulation video</i></small>
 </p>
 
 ### Headless (produce output)
