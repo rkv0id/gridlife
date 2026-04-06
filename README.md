@@ -38,6 +38,15 @@ gridlife serve --sim gray_scott --width 256 --height 256 --steps-per-run 2000
 ```
 
 Open `http://localhost:8420`. Click Play. Scroll to zoom (centered on cursor), shift-drag to pan, click to perturb, right-click to erase.
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=J_IESjgEVpw">
+    <img src="docs/demo.gif" width="900">
+  </a>
+</p>
+
+<p align="center">
+  Click the GIF to watch the full simulation video
+</p>
 
 ### Headless (produce output)
 
